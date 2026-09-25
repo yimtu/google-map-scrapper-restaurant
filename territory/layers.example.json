@@ -1,0 +1,44 @@
+{
+  "MUNICIPALITIES_AMG": {
+    "status": "approved",
+    "source_name": "Limite Municipal Jalisco IIEG",
+    "source_url": "https://iieg.jalisco.gob.mx/datos-abiertos/es/dataset/limite-municipal-jalisco-iieg",
+    "publication_update_date": "2026-09-22T17:30:00Z",
+    "download_date": "2026-09-24",
+    "license": "Creative Commons Attribution 4.0",
+    "sha256": "e389c38b68fdaf6a8e385056c18eb074aa734d4e4acbece5a4bc93a08e7d3f99",
+    "geometry_path": "territory/processed/territory.geojson",
+    "notes": "Nueve municipios aprobados en el flujo histórico del proyecto."
+  },
+  "AMG_FULL": {
+    "status": "approved",
+    "derived_from": "MUNICIPALITIES_AMG",
+    "geometry_path": "territory/processed/territory.geojson"
+  },
+  "CORE_PERIFERICO": {
+    "status": "unapproved",
+    "source_name": "",
+    "source_url": "",
+    "publication_update_date": "",
+    "download_date": "",
+    "license": "",
+    "sha256": "",
+    "geometry_path": "",
+    "notes": "Requiere definición operativa y aprobación humana. No se inventó una geometría."
+  },
+  "URBAN_AMG": {
+    "status": "pending_source",
+    "source_name": "",
+    "source_url": "",
+    "publication_update_date": "",
+    "download_date": "",
+    "license": "",
+    "sha256": "",
+    "geometry_path": "",
+    "sources_reviewed": [
+      "https://iieg.gob.mx/ns/?page_id=155",
+      "https://consultapublica.imeplan.mx/POTmet/downloads/ConectividadE.pdf"
+    ],
+    "notes": "No se localizó una geometría oficial descargable, inequívoca y con metadata completa durante esta actualización."
+  }
+}

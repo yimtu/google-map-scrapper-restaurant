@@ -1,0 +1,154 @@
+--- a/adapters/fetchers/jshttp/jshttp.go
++++ b/adapters/fetchers/jshttp/jshttp.go
+@@ -292,30 +292,7 @@
+ func newBrowser(pw *playwright.Playwright, headless, disableImages bool, proxyPool *ProxyPool, ua string) (*browser, error) {
+ 	opts := playwright.BrowserTypeLaunchOptions{
+ 		Headless: playwright.Bool(headless),
+-		Args: []string{
+-			`--start-maximized`,
+-			`--no-default-browser-check`,
+-			`--disable-dev-shm-usage`,
+-			`--no-sandbox`,
+-			`--disable-setuid-sandbox`,
+-			`--no-zygote`,
+-			`--disable-gpu`,
+-			`--mute-audio`,
+-			`--disable-extensions`,
+-			`--single-process`,
+-			`--disable-breakpad`,
+-			`--disable-features=TranslateUI,BlinkGenPropertyTrees`,
+-			`--disable-ipc-flooding-protection`,
+-			`--enable-features=NetworkService,NetworkServiceInProcess`,
+-			"--enable-features=NetworkService",
+-			`--disable-default-apps`,
+-			`--disable-notifications`,
+-			`--disable-webgl`,
+-			`--disable-blink-features=AutomationControlled`,
+-			"--ignore-certificate-errors",
+-			"--ignore-certificate-errors-spki-list",
+-			"--disable-web-security",
+-		},
++		Args:     chromiumArgs(),
+ 	}
+ 	if disableImages {
+ 		opts.Args = append(opts.Args, `--blink-settings=imagesEnabled=false`)
+@@ -367,3 +344,29 @@
+
+ 	return &ans, nil
+ }
++
++func chromiumArgs() []string {
++	return []string{
++		`--start-maximized`,
++		`--no-default-browser-check`,
++		`--disable-dev-shm-usage`,
++		`--no-sandbox`,
++		`--disable-setuid-sandbox`,
++		`--no-zygote`,
++		`--disable-gpu`,
++		`--mute-audio`,
++		`--disable-extensions`,
++		`--disable-breakpad`,
++		`--disable-features=TranslateUI,BlinkGenPropertyTrees`,
++		`--disable-ipc-flooding-protection`,
++		`--enable-features=NetworkService,NetworkServiceInProcess`,
++		"--enable-features=NetworkService",
++		`--disable-default-apps`,
++		`--disable-notifications`,
++		`--disable-webgl`,
++		`--disable-blink-features=AutomationControlled`,
++		"--ignore-certificate-errors",
++		"--ignore-certificate-errors-spki-list",
++		"--disable-web-security",
++	}
++}
+--- a/adapters/fetchers/jshttp/session_slot.go
++++ b/adapters/fetchers/jshttp/session_slot.go
+@@ -80,7 +80,9 @@
+
+ 	if err := s.runtime.recreatePage(); err != nil {
+ 		if err := s.runtime.recreateContext(); err != nil {
+-			return nil, s.runtime.recreateBrowser()
++			if err := s.runtime.recreateBrowser(); err != nil {
++				return nil, err
++			}
+ 		}
+ 	}
+
+@@ -213,7 +215,11 @@
+ }
+
+ func (p *playwrightPage) isClosed() bool {
+-	return !p.p.IsClosed()
++	return normalizeClosedState(p.p.IsClosed())
++}
++
++func normalizeClosedState(isClosed bool) bool {
++	return isClosed
+ }
+
+ func (p *playwrightPage) playwrightPage() playwright.Page {
+--- a/adapters/fetchers/jshttp/foodscan_patch_internal_test.go
++++ b/adapters/fetchers/jshttp/foodscan_patch_internal_test.go
+@@ -0,0 +1,61 @@
++package jshttp
++
++import (
++	"context"
++	"errors"
++	"testing"
++)
++
++type recoveryRuntime struct {
++	page               page
++	recreatePageErr    error
++	recreateContextErr error
++	recreateBrowserErr error
++}
++
++func (r *recoveryRuntime) pageCount() int             { return 1 }
++func (r *recoveryRuntime) closeExtraPages() error     { return nil }
++func (r *recoveryRuntime) closeBrowser() error        { return nil }
++func (r *recoveryRuntime) primaryPage() (page, error) { return r.page, nil }
++func (r *recoveryRuntime) recreatePage() error        { return r.recreatePageErr }
++func (r *recoveryRuntime) recreateContext() error     { return r.recreateContextErr }
++func (r *recoveryRuntime) recycleIfNeeded() error     { return nil }
++func (r *recoveryRuntime) recreateBrowser() error {
++	if r.recreateBrowserErr == nil {
++		r.page = &fakePage{id: 99}
++	}
++	return r.recreateBrowserErr
++}
++
++func TestFoodScanOpenPageIsNotClosed(t *testing.T) {
++	if normalizeClosedState(false) {
++		t.Fatal("an open Playwright page must be considered open")
++	}
++	if !normalizeClosedState(true) {
++		t.Fatal("a closed Playwright page must be considered closed")
++	}
++}
++
++func TestFoodScanBrowserRecoveryReturnsPrimaryPage(t *testing.T) {
++	runtime := &recoveryRuntime{
++		page:               &fakePage{id: 1, closed: true},
++		recreatePageErr:    errors.New("page recreation failed"),
++		recreateContextErr: errors.New("context recreation failed"),
++	}
++	slot := &sessionSlot{runtime: runtime}
++	got, err := slot.acquirePage(context.Background())
++	if err != nil {
++		t.Fatalf("acquirePage returned error: %v", err)
++	}
++	if got == nil {
++		t.Fatal("successful browser recovery returned (nil, nil)")
++	}
++}
++
++func TestFoodScanChromiumArgsExcludeSingleProcess(t *testing.T) {
++	for _, argument := range chromiumArgs() {
++		if argument == "--single-process" {
++			t.Fatal("--single-process crashes Chromium on Windows and must not be present")
++		}
++	}
++}

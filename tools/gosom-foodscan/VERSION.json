@@ -1,0 +1,34 @@
+{
+  "name": "gosom-foodscan",
+  "version": "0.1.0",
+  "upstream_gosom_version": "v1.18.1",
+  "upstream_scrapemate_version": "v1.4.0",
+  "source_archives": {
+    "gosom": {
+      "url": "https://github.com/gosom/google-maps-scraper/archive/refs/tags/v1.18.1.zip",
+      "sha256": "e44b4b66bf578c8d7dd17fac97d84ee3d59a46c0ef478b089aa59eaf126821a6"
+    },
+    "scrapemate": {
+      "url": "https://github.com/gosom/scrapemate/archive/refs/tags/v1.4.0.zip",
+      "sha256": "e0057db4ee576858d526279c63220f796a3dbccde41893006c997981c7fa4fdc"
+    }
+  },
+  "build_date": "2026-09-24",
+  "go_version": "go1.27.1 windows/amd64",
+  "os": "Windows",
+  "architecture": "AMD64",
+  "sha256": "c879e7d60903101ef1c0a97799f58d47cbfa37d9d0b8cfcd884695a44b77404a",
+  "release_assets": {
+    "windows-amd64": {
+      "url": "https://github.com/yimtu/google-map-scrapper-restaurant/releases/download/foodscan-v0.1.0/gosom-foodscan-windows-amd64.exe",
+      "sha256": "c879e7d60903101ef1c0a97799f58d47cbfa37d9d0b8cfcd884695a44b77404a"
+    }
+  },
+  "size_bytes": 60946944,
+  "official_binary_preserved": "../gosom/gosom.exe",
+  "status": "pinned patched release build",
+  "browser_smoke_records": 16,
+  "ten_query_records": 162,
+  "four_batch_grid_records": 64,
+  "resume_recheck_seconds": 0.123
+}

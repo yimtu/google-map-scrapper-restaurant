@@ -1,0 +1,19 @@
+{
+  "profiles": {
+    "FOOD_CORE": ["restaurante", "comida para llevar", "taquería", "tacos", "tortas", "birriería", "lonchería", "cocina económica", "antojitos", "pizzería", "hamburguesas", "pollo rostizado", "alitas", "sushi", "comida china", "comida japonesa", "comida coreana", "mariscos", "cevichería"],
+    "FOOD_DESSERT": ["cafetería", "coffee shop", "panadería", "pastelería", "repostería", "heladería", "paletería", "postres", "crepas", "waffles", "jugos", "licuados", "bubble tea"],
+    "FOOD_EXTENDED": ["supermercado", "abarrotes", "tienda de conveniencia", "carnicería", "pescadería", "frutería", "delicatessen", "tienda gourmet", "food court", "cine"]
+  },
+  "active_queries": ["restaurante", "comida para llevar", "cafetería", "panadería", "supermercado"],
+  "merchant_families": {
+    "Mexicana / antojitos": ["mexican", "mexicana", "taco", "taquer", "torta", "birrier", "antojito", "loncher"],
+    "Pizza / italiana": ["pizza", "italian", "pasta"],
+    "Hamburguesas / pollo": ["hamburg", "burger", "pollo", "chicken", "alitas"],
+    "Asia": ["sushi", "japan", "japon", "china", "chinese", "corean", "korean", "asian"],
+    "Mariscos": ["marisco", "seafood", "cevich"],
+    "Café / pan / postres": ["cafe", "coffee", "bakery", "panader", "pasteler", "reposter", "helad", "palet", "postre", "crepa", "waffle", "jugo", "licuado", "bubble tea"],
+    "Retail alimentos": ["supermerc", "grocery", "abarrote", "convenience", "conveniencia", "carnicer", "pescader", "fruter", "delicatessen", "gourmet"],
+    "Adyacente": ["cine", "cinema", "movie"]
+  },
+  "default_family": "Otros alimentos"
+}

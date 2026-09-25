@@ -1,0 +1,20 @@
+{
+  "concurrency": 1,
+  "browser_pool": 1,
+  "pages_per_browser": 1,
+  "batch_size": 50,
+  "lang": "es",
+  "exit_on_inactivity": "4m",
+  "batch_timeout_seconds": 7200,
+  "marginal_gain_stop_pct": 0.5,
+  "max_passes": 3,
+  "pilot_points": 12,
+  "minimum_query_yield_pct": 0.5,
+  "health_drop_ratio": 0.5,
+  "mymaps_chunk_size": 2000,
+  "mymaps_enabled": false,
+  "charts_enabled": false,
+  "commercial_target_min_branches": 3,
+  "commercial_target_max_branches": 20,
+  "telemetry_disabled": true
+}

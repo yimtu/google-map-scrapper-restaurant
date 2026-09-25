@@ -1,0 +1,22 @@
+{
+  "densities": {
+    "high": {"cell_km": 0.5, "zoom": 16, "depth": 8, "query_profile": "FOOD_CORE"},
+    "medium": {"cell_km": 1.0, "zoom": 16, "depth": 7, "query_profile": "FOOD_CORE"},
+    "periphery": {"cell_km": 1.5, "zoom": 15, "depth": 5, "query_profile": "FOOD_CORE"},
+    "rural": {"cell_km": 2.0, "zoom": 15, "depth": 5, "query_profile": "FOOD_CORE"}
+  },
+  "adaptive_grid": {
+    "enabled": true,
+    "min_observations": 2,
+    "high_yield": 80,
+    "medium_yield": 30,
+    "high_profile": "high",
+    "medium_profile": "medium",
+    "low_profile": "periphery"
+  },
+  "historical_yields": {},
+  "refine_result_threshold": 80,
+  "marginal_gain_stop_pct": 0.5,
+  "max_grid_points": 100000,
+  "max_passes": 3
+}

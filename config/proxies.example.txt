@@ -1,0 +1,2 @@
+# One optional proxy URL per line. Do not commit real credentials.
+# http://proxy.example.invalid:8080
