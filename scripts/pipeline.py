@@ -8,7 +8,7 @@ from .normalize import normalize_record, normalize_name, read_raw
 from .dedupe import deduplicate, identity
 from .brands import group_brands
 from .exports import write_csv, export_mymaps, compare_records, compare_snapshots
-from .storage import save_run
+from .storage import save_run, resolve_record_ids
 from .geography import GeographyIndex
 from .commercial import LARGE, TARGET, WATCHLIST, plan_branch_network_completion, segment_brands
 from .platforms import create_platform_check_queue, integrate_platform_evidence, platform_quality_gate
@@ -55,7 +55,7 @@ def history(snapshot, manifest):
         if info.get('scope') != manifest.get('scope') or info.get('incomplete', True):
             continue
         rows = json.loads(canonical.read_text(encoding='utf-8'))
-        historical_ids.update(identity(row) for row in rows)
+        historical_ids.update(str(row.get('record_id') or identity(row)) for row in rows)
         previous = rows
     return previous, historical_ids
 
@@ -65,7 +65,7 @@ def coverage(rows):
     for row in rows:
         for source in row.get('provenance', []):
             key = (source.get('zone', 'unknown'), source.get('query', 'unknown'), source.get('pass', 1))
-            groups[key].add(identity(row))
+            groups[key].add(str(row.get('record_id') or identity(row)))
     return [{'zone': k[0], 'query': k[1], 'pass': k[2], 'unique_places': len(ids)} for k, ids in groups.items()]
 
 
@@ -101,9 +101,11 @@ def place_in_scope(row, scope, territory, geography):
 def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict):
     root, snapshot = Path(root), Path(snapshot)
     snapshot.mkdir(parents=True, exist_ok=True)
-    categories = json.loads((root / 'config/categories.json').read_text(encoding='utf-8'))
-    settings_path = root / 'config/settings.json'
-    settings = json.loads(settings_path.read_text(encoding='utf-8')) if settings_path.exists() else {}
+    frozen = manifest.get('frozen_config') or {}
+    categories = dict(frozen.get('categories') or {})
+    settings = dict(frozen.get('settings') or {})
+    if not categories:
+        raise ValueError('Snapshot is missing frozen categories; refusing non-reproducible processing')
     geography = GeographyIndex(territory)
     raw, warnings = ingest(root, snapshot, manifest)
     valid, excluded = [], []
@@ -118,6 +120,9 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
                       'in_core': bool(row.get('inside_core_periferico')),
                       'merchant_family': classify(row, categories)})
     unique = deduplicate(valid)
+    production = snapshot.parent.resolve() == (root / 'snapshots').resolve()
+    identity_db = root / 'data/foodscan.db' if production else snapshot / 'processed/foodscan.db'
+    unique = resolve_record_ids(identity_db, unique, manifest['run_id'])
     places, brands, ambiguous = group_brands(unique)
     brands = plan_branch_network_completion(segment_brands(brands))
     brand_by_id = {row['brand_id']: row for row in brands}
@@ -140,7 +145,9 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
         warnings.append('Incomplete acquisition: missing_this_run is not evidence of closure.')
     if not raw:
         warnings.append('No raw records acquired; check scraper health.')
-    candidates = [b for b in brands if b['commercial_segment'] in {WATCHLIST, TARGET}]
+    candidates = [b for b in brands
+                  if b['commercial_segment'] in {WATCHLIST, TARGET}
+                  and b.get('brand_resolution_status') == 'CONFIRMED']
     coverage_rows = coverage(places)
     report = {'run_id': manifest['run_id'], 'month': manifest.get('month', snapshot.name),
               'date': datetime.now(timezone.utc).isoformat(), 'gosom_version': manifest.get('gosom_version'),
@@ -156,6 +163,9 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
               'target_brands_3_20': sum(b['commercial_segment'] == TARGET for b in brands),
               'large_brands_21_plus': sum(b['commercial_segment'] == LARGE for b in brands),
               'geography_layers': geography.layer_status,
+              'methodology_hash': manifest.get('methodology_hash'),
+              'plan_id': manifest.get('plan_id'), 'plan_sha256': manifest.get('plan_sha256'),
+              'territory_sha256': frozen.get('territory_sha256'),
               'query_yield': manifest.get('query_yield', []), 'coverage_by_zone': coverage_rows,
               'marginal_gain_by_pass': manifest.get('marginal_gain_by_pass', []),
               'warnings': warnings, 'incomplete': incomplete, 'status': manifest.get('status', 'unknown')}
@@ -176,8 +186,13 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
     (snapshot / 'run_report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     metadata = {
         'snapshot_id': report['month'], 'generated_at': report['date'],
-        'gosom_version': report.get('gosom_version'), 'foodscan_version': '0.2.0',
-        'territory_version': manifest.get('territory_version', 'IIEG-AMG-2026-09-22'),
+        'gosom_version': report.get('gosom_version'), 'gosom_sha256': manifest.get('gosom_sha256'),
+        'foodscan_version': '0.3.0',
+        'territory_sha256': frozen.get('territory_sha256'),
+        'territory_source': 'territory/processed/territory.geojson',
+        'source_policy_version': settings.get('source_policy_version', 'unknown'),
+        'plan_id': manifest.get('plan_id'), 'plan_sha256': manifest.get('plan_sha256'),
+        'methodology_hash': manifest.get('methodology_hash'),
         'source_run_ids': [manifest['run_id']], 'geography_layers': geography.layer_status,
     }
     (snapshot / 'metadata.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -188,6 +203,5 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
     report['report_status'] = report_result['report_status']
     report['report_pdf'] = report_result['pdf'].name
     (snapshot / 'run_report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
-    production = snapshot.parent.resolve() == (root / 'snapshots').resolve()
-    save_run(root / 'data/foodscan.db' if production else snapshot / 'processed/foodscan.db', report, places, brands)
+    save_run(identity_db, report, places, brands)
     return report
