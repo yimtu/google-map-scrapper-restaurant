@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .gosom import active_binary_path, gosom_env, sha256
+from .planning import code_identity
 
 
 def utc_now() -> str:
@@ -133,6 +134,24 @@ def _validate_proxy(root: Path, manifest: dict[str, Any]) -> None:
         raise RuntimeError("La configuración de proxy cambió desde la aprobación; genera/aprueba un plan nuevo")
 
 
+def _validate_code(root: Path, manifest: dict[str, Any]) -> None:
+    expected = manifest.get("code_sha256")
+    if expected and code_identity(root) != expected:
+        raise RuntimeError("El código FoodScan cambió desde que se creó el plan; genera/aprueba un plan nuevo")
+
+
+def _validate_batch_input(batch: dict[str, Any]) -> None:
+    path = Path(batch["input"])
+    if not path.is_file():
+        raise FileNotFoundError(f"Falta input de batch: {path}")
+    expected = "".join(
+        f"{job['url']} #!# {job['job_id']}\n" for job in batch.get("jobs", [])
+    )
+    actual = path.read_text(encoding="utf-8")
+    if actual != expected:
+        raise RuntimeError(f"El input de {batch.get('batch_id')} fue modificado respecto al plan")
+
+
 def execute_manifest(
     root: Path, manifest_path: Path, *, binary: Path | None = None,
     only_incomplete: bool = True,
@@ -149,6 +168,9 @@ def execute_manifest(
         raise FileNotFoundError("Gosom no está instalado; ejecuta foodscan setup")
     _validate_binary(binary, manifest)
     _validate_proxy(root, manifest)
+    _validate_code(root, manifest)
+    for batch in manifest["batches"]:
+        _validate_batch_input(batch)
 
     settings = _settings(manifest)
     max_retries = max(0, int(settings.get("batch_max_retries", 2)))
