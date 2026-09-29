@@ -330,8 +330,12 @@ def command_approve(args) -> int:
     from scripts.planning import approve_manifest
     path = _manifest_path(args.plan)
     manifest = read_json(path)
+    if not args.ack_source_policy:
+        raise RuntimeError("Debes confirmar la política de fuente/licenciamiento con --ack-source-policy")
     if not (manifest.get("calibration") or {}).get("eta", {}).get("available"):
         raise RuntimeError("No se aprueba una corrida grande sin piloto y ETA disponibles")
+    manifest["source_policy_acknowledged"] = True
+    manifest["source_policy_acknowledged_at"] = datetime.now(timezone.utc).isoformat()
     approve_manifest(manifest)
     write_json(path, manifest)
     print_plan(manifest)
@@ -547,6 +551,8 @@ def parser() -> argparse.ArgumentParser:
     item = commands.add_parser("approve")
     item.set_defaults(function=command_approve)
     item.add_argument("--plan", required=True)
+    item.add_argument("--ack-source-policy", action="store_true",
+                      help="confirma que la organización revisó y autoriza la fuente/uso")
 
     item = commands.add_parser("monthly")
     item.set_defaults(function=command_monthly)
