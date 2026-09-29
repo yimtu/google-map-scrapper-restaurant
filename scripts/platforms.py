@@ -24,6 +24,7 @@ EVIDENCE_FIELDS = (
     "brand_id", "brand_name", "branch_id", "branch_name", "platform", "status",
     "evidence_url", "evidence_type", "matched_name", "matched_address", "matched_phone",
     "page_title", "search_queries", "checked_at", "method", "confidence", "notes",
+    "verifier_type", "protocol_version",
 )
 
 
@@ -88,6 +89,8 @@ def _validate_evidence(source: Mapping) -> dict:
     row = {field: source.get(field, "") for field in EVIDENCE_FIELDS}
     row["platform"] = normalize_platform(source.get("platform"))
     row["status"] = normalize_platform_status(source.get("status"))
+    row["verifier_type"] = str(source.get("verifier_type") or source.get("method") or "agent")
+    row["protocol_version"] = str(source.get("protocol_version") or "1")
     missing = [field for field in ("brand_id", "branch_id") if not row[field]]
     if row["status"] in COMPLETED_STATUSES | {ERROR}:
         missing.extend(field for field in ("checked_at", "method") if not row[field])
