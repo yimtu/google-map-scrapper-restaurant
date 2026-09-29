@@ -48,6 +48,14 @@ class CategoryContractTests(unittest.TestCase):
         }, resolved)
         self.assertEqual(REQUESTED, decision["category_relationship"])
 
+    def test_short_category_does_not_match_inside_unrelated_word(self):
+        resolved = resolve_requested_categories(self.base_config(), ["bar"])
+        decision = classify_requested_relationship({
+            "title": "Barbería Central",
+            "google_category": "Barbería",
+        }, resolved)
+        self.assertEqual(ADDITIONAL, decision["category_relationship"])
+
     def test_google_recommendations_are_preserved_as_additional(self):
         resolved = resolve_requested_categories(self.base_config(), ["tacos"])
         decision = classify_requested_relationship({
