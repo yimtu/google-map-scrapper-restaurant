@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from urllib.parse import urlparse
 
 from .commercial import TARGET, WATCHLIST, classify_branch_count, branch_count
 
@@ -115,12 +116,21 @@ def _as_items(value: object) -> list[dict]:
 
 
 def _platform_from_link(link: str, source: str = "") -> str | None:
-    value = f"{link} {source}".casefold()
-    if "ubereats" in value or "uber.com" in value and "eat" in value:
+    """Identify provider from the destination domain, never from a label alone."""
+    parsed = urlparse(link if "://" in link else "https://" + link)
+    host = (parsed.hostname or "").casefold().removeprefix("www.")
+    path = parsed.path.casefold()
+    if host == "ubereats.com" or host.endswith(".ubereats.com"):
         return "UBER_EATS"
-    if "rappi" in value:
+    if (host == "uber.com" or host.endswith(".uber.com")) and (
+        "eat" in path or "uber eats" in str(source or "").casefold()
+    ):
+        return "UBER_EATS"
+    if host == "rappi.com" or host.endswith(".rappi.com") or host == "rappi.com.mx" or host.endswith(".rappi.com.mx"):
         return "RAPPI"
-    if "didi" in value:
+    if host == "didiglobal.com" or host.endswith(".didiglobal.com"):
+        return "DIDI_FOOD"
+    if host == "didi-food.com" or host.endswith(".didi-food.com"):
         return "DIDI_FOOD"
     return None
 
