@@ -75,28 +75,34 @@ def group_brands(rows):
     for name, members in by_name.items():
         hosts = {domain(row.get("website", "")) for row in members} - {""}
 
+        confirmed_members = []
+        residual_members = list(members)
         if name and name not in GENERIC_NAMES and len(members) > 1 and len(hosts) == 1:
             host = next(iter(hosts))
             explicit_host_members = [
                 row for row in members if domain(row.get("website", "")) == host
             ]
-            # Precision-first: at least two distinct establishments must independently
-            # carry the same private domain. One website plus same-name rows is not enough.
+            # Precision-first: at least two establishments must independently carry
+            # the same private domain, and only those evidenced rows auto-join.
             if len(explicit_host_members) >= 2:
-                groups.append(("confirmed", ("domain_name", host, name), members))
-                continue
+                confirmed_members = explicit_host_members
+                residual_members = [row for row in members if row not in explicit_host_members]
+                groups.append(("confirmed", ("domain_name", host, name), confirmed_members))
 
-        # No strong evidence: keep establishments separate. If the same non-generic
-        # name appears more than once, preserve a review candidate with member IDs.
-        if name and name not in GENERIC_NAMES and len(members) > 1:
+        # Same-name rows without per-establishment evidence remain independent and
+        # visible for review, even when a confirmed chain with that name exists.
+        if name and name not in GENERIC_NAMES and len(residual_members) > 0 and (
+            len(members) > 1 or confirmed_members
+        ):
             ambiguous.append({
                 "name": name,
-                "candidate_count": len(members),
-                "member_record_ids": ";".join(str(row.get("record_id", "")) for row in members),
-                "reason": "exact_name_without_independent_chain_evidence",
+                "candidate_count": len(residual_members),
+                "member_record_ids": ";".join(str(row.get("record_id", "")) for row in residual_members),
+                "confirmed_member_count": len(confirmed_members),
+                "reason": "same_name_without_per_establishment_chain_evidence",
                 "resolution_status": "AMBIGUOUS",
             })
-        for row in members:
+        for row in residual_members:
             groups.append(("single", ("individual", row["record_id"]), [row]))
 
     places, brands = [], []
