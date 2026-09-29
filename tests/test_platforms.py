@@ -125,6 +125,16 @@ class PlatformTests(unittest.TestCase):
         self.assertTrue(all(row["verifier_type"] == "gosom" for row in rows))
         self.assertFalse(any(row["status"] == NOT_FOUND for row in rows))
 
+    def test_provider_label_on_unrelated_domain_never_auto_confirms(self):
+        branch = {
+            "brand_id": "b", "brand_name": "Marca", "branch_id": "one",
+            "branch_name": "Marca Centro", "address": "Calle Uno",
+            "order_online": [{"link": "https://example.com/order", "source": "Rappi"}],
+        }
+        self.assertEqual([], gosom_platform_evidence(
+            [branch], checked_at="2026-09-29T12:00:00Z"
+        ))
+
     def test_gosom_positive_link_without_branch_identity_stays_for_web_review(self):
         branch = {
             "brand_id": "b", "brand_name": "Marca", "branch_id": "one",
