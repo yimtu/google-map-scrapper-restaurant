@@ -213,8 +213,10 @@ def command_plan(args) -> int:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     destination = ROOT / "generated" / "plans" / f"{stamp}-{args.scope}"
     requested = [item.strip() for item in (args.categories or "").split(",") if item.strip()]
+    if not requested:
+        raise RuntimeError("Debes indicar al menos una categoría humana explícita en --categories")
     manifest = build_plan(args.scope, destination, month=month_value(args.month),
-                          requested_categories=requested or None)
+                          requested_categories=requested)
     print_plan(manifest)
     print(f"Plan guardado: {destination / 'run_manifest.json'}")
     print("Siguiente paso: ejecutar el piloto de calibración sobre este plan.")
