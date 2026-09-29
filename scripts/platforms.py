@@ -72,23 +72,29 @@ def create_platform_check_queue(
         and str(brand.get("brand_resolution_status", "CONFIRMED")) == "CONFIRMED"
     }
     canonical_platforms = tuple(dict.fromkeys(normalize_platform(item) for item in platforms))
+    branch_rows = [dict(row) for row in branches]
     queue = []
-    for branch in branches:
-        brand_id = str(branch.get("brand_id", ""))
-        brand = selected.get(brand_id)
-        if not brand:
-            continue
+    for brand_id, brand in selected.items():
+        members = [row for row in branch_rows if str(row.get("brand_id", "")) == brand_id]
         for platform in canonical_platforms:
-            queue.append({
-                "brand_id": brand_id,
-                "branch_id": branch.get("branch_id", ""),
-                "brand": brand.get("brand_name", branch.get("brand_name", "")),
-                "branch": branch.get("branch_name", branch.get("title", "")),
-                "address": branch.get("address", ""),
-                "phone": branch.get("phone", ""),
-                "website": branch.get("website", ""),
-                "platform": platform,
-            })
+            prefix = _PREFIX[platform]
+            brand_status = normalize_platform_status(brand.get(f"{prefix}_status", PENDING))
+            if brand_status in COMPLETED_STATUSES:
+                continue
+            for branch in members:
+                branch_status = normalize_platform_status(branch.get(f"{prefix}_status", PENDING))
+                if branch_status in COMPLETED_STATUSES:
+                    continue
+                queue.append({
+                    "brand_id": brand_id,
+                    "branch_id": branch.get("branch_id", ""),
+                    "brand": brand.get("brand_name", branch.get("brand_name", "")),
+                    "branch": branch.get("branch_name", branch.get("title", "")),
+                    "address": branch.get("address", ""),
+                    "phone": branch.get("phone", ""),
+                    "website": branch.get("website", ""),
+                    "platform": platform,
+                })
     return queue
 
 
@@ -234,12 +240,12 @@ def integrate_platform_evidence(
             prefix = _PREFIX[platform]
             statuses = [member[f"{prefix}_status"] for member in members]
             found = sum(status == CONFIRMED for status in statuses)
-            if ERROR in statuses:
+            if found:
+                status = CONFIRMED
+            elif ERROR in statuses:
                 status = ERROR
             elif PENDING in statuses or not statuses:
                 status = PENDING
-            elif found:
-                status = CONFIRMED
             elif statuses and all(item == NOT_FOUND for item in statuses):
                 status = NOT_FOUND
             else:
@@ -258,30 +264,50 @@ def integrate_platform_evidence(
     }
 
 
+def _brand_platform_status(members: list[Mapping], platform: str) -> str:
+    prefix = _PREFIX[platform]
+    statuses = [normalize_platform_status(row.get(f"{prefix}_status", PENDING)) for row in members]
+    if CONFIRMED in statuses:
+        return CONFIRMED
+    if ERROR in statuses:
+        return ERROR
+    if PENDING in statuses or not statuses:
+        return PENDING
+    if statuses and all(item == NOT_FOUND for item in statuses):
+        return NOT_FOUND
+    return UNCERTAIN
+
+
 def platform_quality_gate(queue: Iterable[Mapping], branch_presence: Iterable[Mapping], *, requested: bool) -> dict:
-    """Validate every expected TARGET branch/platform check before a final report."""
+    """Gate one independent decision per business×platform, not one delivery bundle.
+
+    A positive branch proves brand presence on that platform. A negative business
+    decision requires every observed branch to have completed without a positive.
+    """
     if not requested:
         return {"expected_checks": 0, "completed_checks": 0, "pending_checks": 0,
                 "errors": 0, "report_status": "FINAL", "platform_section_included": False,
                 "missing_checks": [], "error_checks": []}
-    branches = {(str(row.get("brand_id", "")), str(row.get("branch_id", ""))): row
-                for row in branch_presence}
+    rows = [dict(row) for row in branch_presence]
+    by_brand: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        if branch_count(row) >= 3 and str(row.get("brand_resolution_status", "CONFIRMED")) == "CONFIRMED":
+            by_brand[str(row.get("brand_id", ""))].append(row)
+
     completed = pending = errors = 0
     missing_checks, error_checks = [], []
-    for expected in queue:
-        platform = normalize_platform(expected.get("platform"))
-        key = (str(expected.get("brand_id", "")), str(expected.get("branch_id", "")))
-        row = branches.get(key, {})
-        status = normalize_platform_status(row.get(f"{_PREFIX[platform]}_status", PENDING))
-        check = {"brand_id": key[0], "branch_id": key[1], "platform": platform}
-        if status in COMPLETED_STATUSES:
-            completed += 1
-        elif status == ERROR:
-            errors += 1
-            error_checks.append(check)
-        else:
-            pending += 1
-            missing_checks.append(check)
+    for brand_id, members in by_brand.items():
+        for platform in PLATFORMS:
+            status = _brand_platform_status(members, platform)
+            check = {"brand_id": brand_id, "platform": platform}
+            if status in COMPLETED_STATUSES:
+                completed += 1
+            elif status == ERROR:
+                errors += 1
+                error_checks.append(check)
+            else:
+                pending += 1
+                missing_checks.append(check)
     expected_count = completed + pending + errors
     return {"expected_checks": expected_count, "completed_checks": completed,
             "pending_checks": pending, "errors": errors,
