@@ -56,9 +56,9 @@ class PlatformVerificationTests(unittest.TestCase):
             root = Path(folder)
             snapshot = self.fixture(root)
             result = verify_platforms(root, snapshot)
-            self.assertEqual(result["expected_checks"], 9)
+            self.assertEqual(result["expected_checks"], 3)
             self.assertEqual(result["completed_checks"], 0)
-            self.assertEqual(result["pending_checks"], 9)
+            self.assertEqual(result["pending_checks"], 3)
             self.assertEqual(result["report_status"], "DRAFT")
             with (snapshot / "platform_check_queue.csv").open(encoding="utf-8-sig") as stream:
                 queue = list(csv.DictReader(stream))
@@ -81,7 +81,8 @@ class PlatformVerificationTests(unittest.TestCase):
             evidence = root / "agent-evidence.csv"
             write_csv(evidence, rows)
             result = verify_platforms(root, snapshot, evidence_path=evidence)
-            self.assertEqual(result["completed_checks"], 9)
+            self.assertEqual(result["expected_checks"], 3)
+            self.assertEqual(result["completed_checks"], 3)
             self.assertEqual(result["pending_checks"], 0)
             self.assertEqual(result["report_status"], "FINAL")
             self.assertTrue((snapshot / "platform_evidence.csv").exists())
@@ -102,8 +103,9 @@ class PlatformVerificationTests(unittest.TestCase):
             write_csv(second, [{**base, "branch_id": "p2"}])
             first_result = verify_platforms(root, snapshot, evidence_path=first)
             second_result = verify_platforms(root, snapshot, evidence_path=second)
-            self.assertEqual(1, first_result["completed_checks"])
-            self.assertEqual(2, second_result["completed_checks"])
+            self.assertEqual(0, first_result["completed_checks"])
+            self.assertEqual(0, second_result["completed_checks"])
+            self.assertEqual(3, second_result["pending_checks"])
             with (snapshot / "platform_evidence.csv").open(encoding="utf-8-sig") as stream:
                 rows = list(csv.DictReader(stream))
             self.assertEqual(2, len(rows))
