@@ -98,7 +98,7 @@ def _gosom_identity() -> tuple[str | None, str | None]:
 def build_plan(scope: str, destination: Path, *, month: str | None = None) -> dict:
     from scripts.grid import generate_grid, write_grid
     from scripts.queries import make_jobs, write_batches
-    from scripts.planning import attach_plan_identity, methodology_hash, plan_payload
+    from scripts.planning import attach_plan_identity, code_identity, methodology_hash, plan_payload
 
     territory_path = ROOT / "territory" / "processed" / "territory.geojson"
     from scripts.territory import load_territory
@@ -124,6 +124,9 @@ def build_plan(scope: str, destination: Path, *, month: str | None = None) -> di
     )
     proxy_file_sha256 = hashlib.sha256(proxy_file.read_bytes()).hexdigest() if proxy_enabled else None
     territory_sha = hashlib.sha256(territory_path.read_bytes()).hexdigest()
+    frozen_territory = destination / "territory.geojson"
+    shutil.copyfile(territory_path, frozen_territory)
+    code_sha = code_identity(ROOT)
     frozen = {
         "coverage": coverage,
         "categories": categories,
@@ -141,6 +144,7 @@ def build_plan(scope: str, destination: Path, *, month: str | None = None) -> di
         "platform_verification_requested": True,
         "gosom_version": version,
         "gosom_sha256": binary_sha,
+        "code_sha256": code_sha,
         "proxy_enabled": proxy_enabled,
         "proxy_file_sha256": proxy_file_sha256,
         "grid_points": len(points),
@@ -152,7 +156,7 @@ def build_plan(scope: str, destination: Path, *, month: str | None = None) -> di
     payload = plan_payload(
         scope=scope, territory_sha256=territory_sha, coverage=coverage, categories=categories,
         settings=settings, grid_points=points, jobs=jobs, gosom_version=version,
-        gosom_sha256=binary_sha, proxy_file_sha256=proxy_file_sha256, code_commit=None,
+        gosom_sha256=binary_sha, proxy_file_sha256=proxy_file_sha256, code_sha256=code_sha,
     )
     attach_plan_identity(manifest, payload)
     manifest["methodology_hash"] = methodology_hash(manifest)
@@ -237,6 +241,7 @@ def _pilot_from_plan(plan_path: Path, destination: Path) -> dict:
         "platform_verification_requested": False,
         "gosom_version": source.get("gosom_version"),
         "gosom_sha256": source.get("gosom_sha256"),
+        "code_sha256": source.get("code_sha256"),
         "proxy_enabled": source.get("proxy_enabled", False),
         "proxy_file_sha256": source.get("proxy_file_sha256"),
         "grid_points": len({job.get("point_id") for job in selected}),
@@ -366,11 +371,20 @@ def _materialize_plan(plan_path: Path, destination: Path) -> Path:
     materialized["run_id"] = f"{plan.get('month')}-{plan['scope']}-{plan.get('plan_id', 'plan')}"
     materialized["status"] = "planned"
     materialized["batches"] = []
+    source_territory = plan_path.parent / "territory.geojson"
+    if not source_territory.is_file():
+        raise RuntimeError("El plan no conserva su territorio congelado")
+    territory_bytes = source_territory.read_bytes()
+    if hashlib.sha256(territory_bytes).hexdigest() != plan.get("frozen_config", {}).get("territory_sha256"):
+        raise RuntimeError("El territorio congelado del plan fue modificado")
+    (destination / "territory.geojson").write_bytes(territory_bytes)
     for source_batch in plan.get("batches", []):
         batch = dict(source_batch)
-        source_input = Path(source_batch["input"])
-        target_input = batches_dir / source_input.name
-        shutil.copyfile(source_input, target_input)
+        target_input = batches_dir / Path(source_batch["input"]).name
+        expected_input = "".join(
+            f"{job['url']} #!# {job['job_id']}\n" for job in batch.get("jobs", [])
+        )
+        target_input.write_text(expected_input, encoding="utf-8")
         batch["input"] = str(target_input.resolve())
         batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.csv").resolve())
         batch["status"] = "planned"
@@ -384,7 +398,13 @@ def finish_snapshot(path: Path) -> dict:
     from scripts.pipeline import process_snapshot
     from scripts.territory import load_territory
     manifest = read_json(path / "run_manifest.json")
-    territory = load_territory(ROOT / "territory" / "processed" / "territory.geojson")
+    territory_path = path / "territory.geojson"
+    if not territory_path.is_file():
+        raise RuntimeError("El snapshot no conserva el territorio congelado del plan")
+    expected = manifest.get("frozen_config", {}).get("territory_sha256")
+    if expected and hashlib.sha256(territory_path.read_bytes()).hexdigest() != expected:
+        raise RuntimeError("El territorio del snapshot no coincide con el plan aprobado")
+    territory = load_territory(territory_path)
     return process_snapshot(ROOT, path, territory, manifest)
 
 
@@ -585,6 +605,7 @@ def command_expand_brands(args) -> int:
             "status": "planned",
             "gosom_version": manifest.get("gosom_version"),
             "gosom_sha256": manifest.get("gosom_sha256"),
+            "code_sha256": manifest.get("code_sha256"),
             "proxy_enabled": manifest.get("proxy_enabled", False),
             "proxy_file_sha256": manifest.get("proxy_file_sha256"),
             "approved_runtime": manifest.get("approved_runtime", {}),
