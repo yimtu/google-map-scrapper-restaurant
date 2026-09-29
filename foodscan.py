@@ -698,6 +698,8 @@ def parser() -> argparse.ArgumentParser:
     item.set_defaults(function=command_plan)
     item.add_argument("--scope", choices=["CORE_GDL", "AMG_FULL"], default="AMG_FULL")
     item.add_argument("--month")
+    item.add_argument("--categories",
+                      help="categorías humanas separadas por coma; FoodScan congela queries y reglas")
 
     item = commands.add_parser("pilot")
     item.set_defaults(function=command_pilot)
