@@ -201,23 +201,46 @@ def _place_detail(row: dict, style):
     location = " · ".join(bit for bit in location_bits if bit)
     menu = row.get("menu")
     order_online = row.get("order_online")
+    coords = ""
+    if row.get("latitude") not in (None, "") and row.get("longitude") not in (None, ""):
+        coords = f"{row.get('latitude')}, {row.get('longitude')}"
+    owner = row.get("owner")
+    reservations = row.get("reservations")
+    emails = row.get("emails")
+    popular = row.get("popular_times")
+    cards = row.get("credit_cards_accepted")
+    images = row.get("images")
+    image_count = len(images) if isinstance(images, list) else (1 if images not in (None, "", []) else 0)
     lines = [
         f"<b>Categoría Google:</b> {html.escape(_text(row.get('google_category', ''), 100))}",
-        f"<b>Tags:</b> {html.escape(_text(tags, 220))}",
+        f"<b>Tags:</b> {html.escape(_text(tags, 240))}",
         f"<b>Relación:</b> {html.escape(_relationship_label(row.get('category_relationship')))}"
         + (f" · <b>Match:</b> {html.escape(matches)}" if matches else ""),
-        f"<b>Queries que lo encontraron:</b> {html.escape(_text(queries, 240))}",
-        f"<b>Ubicación:</b> {html.escape(_text(location, 180))}",
-        f"<b>Dirección:</b> {html.escape(_text(row.get('address', ''), 220))}",
+        f"<b>Queries que lo encontraron:</b> {html.escape(_text(queries, 260))}",
+        f"<b>Ubicación:</b> {html.escape(_text(location, 180))}"
+        f" · <b>Coordenadas:</b> {html.escape(coords)}"
+        f" · <b>Plus code:</b> {html.escape(_text(row.get('plus_code', ''), 60))}",
+        f"<b>Dirección:</b> {html.escape(_text(row.get('address', ''), 240))}",
         f"<b>Rating / reviews / precio:</b> {html.escape(str(_first(row, 'review_rating', 'rating')))}"
         f" / {html.escape(str(row.get('review_count', '')))} / {html.escape(_text(row.get('price_range', ''), 60))}",
+        f"<b>Distribución de ratings:</b> {html.escape(_text(row.get('reviews_per_rating', ''), 180))}",
         f"<b>Teléfono:</b> {html.escape(_text(row.get('phone', ''), 80))}"
-        f" · <b>Website:</b> {html.escape(_text(row.get('website', ''), 180))}",
-        f"<b>Horarios:</b> {html.escape(_text(row.get('open_hours', ''), 300))}",
-        f"<b>Atributos:</b> {html.escape(_text(_about_summary(row), 320))}",
+        f" · <b>Website:</b> {html.escape(_text(row.get('website', ''), 180))}"
+        f" · <b>Email:</b> {html.escape(_text(emails, 160))}",
+        f"<b>Horarios:</b> {html.escape(_text(row.get('open_hours', ''), 340))}",
+        f"<b>Popular times:</b> {html.escape(_text(popular, 300))}",
+        f"<b>Atributos:</b> {html.escape(_text(_about_summary(row), 380))}",
+        f"<b>Tarjetas:</b> {html.escape(_text(cards, 140))}",
+        f"<b>Descripción:</b> {html.escape(_text(row.get('descriptions', ''), 260))}",
         f"<b>Menú:</b> {html.escape(_text(menu, 220))}",
-        f"<b>Order online:</b> {html.escape(_text(order_online, 280))}",
-        f"<b>Google Maps:</b> {html.escape(_text(row.get('link', ''), 220))}",
+        f"<b>Reservaciones:</b> {html.escape(_text(reservations, 220))}",
+        f"<b>Order online:</b> {html.escape(_text(order_online, 300))}",
+        f"<b>Propietario Google:</b> {html.escape(_text(owner, 180))}"
+        f" · <b>Imágenes capturadas:</b> {image_count}",
+        f"<b>Google Maps:</b> {html.escape(_text(row.get('link', ''), 240))}",
+        f"<b>IDs de fuente:</b> place_id={html.escape(_text(row.get('place_id', ''), 100))}"
+        f" · cid={html.escape(_text(row.get('cid', ''), 100))}"
+        f" · data_id={html.escape(_text(row.get('data_id', ''), 100))}",
     ]
     return Paragraph("<br/>".join(lines), style)
 
@@ -348,7 +371,9 @@ def _build_pdf(path: Path, places: list[dict], commercial: list[dict], metrics: 
         ("Categoría Google", "google_category"),
         ("Teléfono", "phone"), ("Website", "website"), ("Rating", "review_rating"),
         ("Reviews", "review_count"), ("Horarios", "open_hours"), ("Precio", "price_range"),
-        ("Atributos/about", "about"), ("Menú", "menu"), ("Order online", "order_online"),
+        ("Atributos/about", "about"), ("Popular times", "popular_times"),
+        ("Menú", "menu"), ("Reservaciones", "reservations"),
+        ("Order online", "order_online"), ("Emails", "emails"),
     ]
     data_rows = [["Dato capturado", "Con dato", "% de únicos"]]
     for label, field in coverage_fields:
@@ -593,7 +618,8 @@ def generate_standard_reports(snapshot: Path, places: Iterable[dict], brands: It
         additional_category_summary[category] = additional_category_summary.get(category, 0) + 1
     data_coverage = {}
     for field in ("google_category", "phone", "website", "review_rating", "review_count",
-                  "open_hours", "price_range", "about", "menu", "order_online"):
+                  "open_hours", "price_range", "about", "popular_times", "menu",
+                  "reservations", "order_online", "emails"):
         count = sum(row.get(field) not in (None, "", [], {}) for row in places)
         data_coverage[field] = {
             "with_data": count,
