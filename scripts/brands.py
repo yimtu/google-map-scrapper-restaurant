@@ -36,6 +36,14 @@ def _brand_row(brand_id, members, evidence, confidence, resolution_status):
                if str(r.get("review_count", "")).replace(".", "", 1).isdigit()]
     websites = sorted({r.get("website") for r in members if r.get("website")})
     phones = sorted({r.get("phone") for r in members if r.get("phone")})
+    relationship_counts = Counter(str(r.get("category_relationship") or "UNCLASSIFIED") for r in members)
+    relationships = {key for key, value in relationship_counts.items() if value}
+    category_scope = next(iter(relationships)) if len(relationships) == 1 else "MIXED"
+    requested_matches = []
+    for row in members:
+        for item in row.get("matched_requested_categories") or []:
+            if item not in requested_matches:
+                requested_matches.append(item)
     return {
         "brand_id": brand_id,
         "brand_name": members[0].get("title", ""),
@@ -53,6 +61,11 @@ def _brand_row(brand_id, members, evidence, confidence, resolution_status):
         "brand_scope": "uncertain",
         "confidence": confidence,
         "brand_resolution_status": resolution_status,
+        "category_scope": category_scope,
+        "requested_branch_count": relationship_counts.get("REQUESTED", 0),
+        "additional_branch_count": relationship_counts.get("ADDITIONAL", 0),
+        "unclassified_branch_count": relationship_counts.get("UNCLASSIFIED", 0),
+        "matched_requested_categories": requested_matches,
         "evidence": evidence,
     }
 
