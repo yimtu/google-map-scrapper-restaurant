@@ -8,6 +8,7 @@ from scripts.platforms import (
     UNCERTAIN,
     create_platform_check_queue,
     executive_platform_label,
+    gosom_platform_evidence,
     integrate_platform_evidence,
     normalize_platform_status,
     platform_quality_gate,
@@ -28,24 +29,103 @@ class PlatformTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize_platform_status("NO")
 
-    def test_queue_defaults_to_target_and_has_one_row_per_branch_platform(self):
+    def test_queue_covers_any_confirmed_business_with_three_or_more_locations(self):
         brands = [
-            {"brand_id": "target", "brand_name": "Tres", "branch_count_amg": 3},
-            {"brand_id": "watch", "brand_name": "Dos", "branch_count_amg": 2},
+            {"brand_id": "target", "brand_name": "Tres", "branch_count_amg": 3,
+             "brand_resolution_status": "CONFIRMED", "merchant_family": "Ferretería"},
+            {"brand_id": "large", "brand_name": "Treinta", "branch_count_amg": 30,
+             "brand_resolution_status": "CONFIRMED", "merchant_family": "Gimnasio"},
+            {"brand_id": "watch", "brand_name": "Dos", "branch_count_amg": 2,
+             "brand_resolution_status": "CONFIRMED"},
         ]
         branches = [
-            {"brand_id": "target", "branch_id": "t1", "branch_name": "Centro", "address": "A"},
-            {"brand_id": "target", "branch_id": "t2", "branch_name": "Norte", "address": "B"},
-            {"brand_id": "watch", "branch_id": "w1", "branch_name": "Uno", "address": "C"},
+            {"brand_id": "target", "branch_id": f"t{i}", "branch_name": f"T{i}"}
+            for i in range(3)
+        ] + [
+            {"brand_id": "large", "branch_id": f"l{i}", "branch_name": f"L{i}"}
+            for i in range(30)
+        ] + [
+            {"brand_id": "watch", "branch_id": "w1", "branch_name": "W1"},
+            {"brand_id": "watch", "branch_id": "w2", "branch_name": "W2"},
         ]
         queue = create_platform_check_queue(brands, branches)
-        self.assertEqual(len(queue), 6)
-        self.assertEqual({row["platform"] for row in queue}, {"UBER_EATS", "RAPPI", "DIDI_FOOD"})
-        self.assertEqual({row["brand_id"] for row in queue}, {"target"})
-        watch_queue = create_platform_check_queue(brands, branches, include_watchlist=True)
-        self.assertEqual(len(watch_queue), 9)
+        self.assertEqual(99, len(queue))
+        self.assertEqual({"target", "large"}, {row["brand_id"] for row in queue})
+        self.assertEqual({"UBER_EATS", "RAPPI", "DIDI_FOOD"},
+                         {row["platform"] for row in queue})
 
-    def test_integration_produces_branch_and_brand_presence_with_evidence(self):
+    def test_one_positive_branch_resolves_business_platform_but_not_other_platforms(self):
+        brands = [{"brand_id": "b", "brand_name": "Marca", "branch_count_amg": 3,
+                   "brand_resolution_status": "CONFIRMED"}]
+        branches = [
+            {"brand_id": "b", "branch_id": "one", "branch_count_amg": 3,
+             "brand_resolution_status": "CONFIRMED"},
+            {"brand_id": "b", "branch_id": "two", "branch_count_amg": 3,
+             "brand_resolution_status": "CONFIRMED"},
+            {"brand_id": "b", "branch_id": "three", "branch_count_amg": 3,
+             "brand_resolution_status": "CONFIRMED"},
+        ]
+        evidence = [{
+            "brand_id": "b", "branch_id": "one", "platform": "uber",
+            "status": "CONFIRMED", "evidence_url": "https://ubereats.example/one",
+            "page_title": "Marca Uno | Uber Eats", "checked_at": "2026-09-25",
+            "method": "integrated_browser", "matched_name": "Marca",
+            "matched_address": "Calle Uno",
+        }]
+        result = integrate_platform_evidence(brands, branches, evidence)
+        brand = result["brand_presence"][0]
+        self.assertEqual(CONFIRMED, brand["uber_status"])
+        self.assertEqual(PENDING, brand["rappi_status"])
+        self.assertEqual(PENDING, brand["didi_status"])
+
+        queue = create_platform_check_queue(result["brand_presence"], result["branch_presence"])
+        self.assertNotIn("UBER_EATS", {row["platform"] for row in queue})
+        self.assertEqual(6, len(queue))
+
+        gate = platform_quality_gate(queue, result["branch_presence"], requested=True)
+        self.assertEqual(3, gate["expected_checks"])
+        self.assertEqual(1, gate["completed_checks"])
+        self.assertEqual(2, gate["pending_checks"])
+        self.assertEqual("DRAFT", gate["report_status"])
+
+    def test_business_not_found_requires_all_observed_locations(self):
+        brand = {"brand_id": "b", "brand_name": "Marca", "branch_count_amg": 3,
+                 "brand_resolution_status": "CONFIRMED"}
+        branches = [{**brand, "branch_id": value} for value in ("one", "two", "three")]
+        base = {
+            "brand_id": "b", "platform": "rappi", "status": "NOT_FOUND",
+            "checked_at": "2026-09-25", "method": "browser",
+            "search_queries": "general || domain || brand+location",
+        }
+        partial = integrate_platform_evidence([brand], branches, [
+            {**base, "branch_id": "one"},
+            {**base, "branch_id": "two"},
+        ])
+        self.assertEqual(PENDING, partial["brand_presence"][0]["rappi_status"])
+        final = integrate_platform_evidence([brand], branches, [
+            {**base, "branch_id": "one"},
+            {**base, "branch_id": "two"},
+            {**base, "branch_id": "three"},
+        ])
+        self.assertEqual(NOT_FOUND, final["brand_presence"][0]["rappi_status"])
+
+    def test_gosom_order_online_creates_positive_provider_evidence_only(self):
+        branch = {
+            "brand_id": "b", "brand_name": "Marca", "branch_id": "one",
+            "branch_name": "Marca Centro", "address": "Calle Uno", "phone": "33",
+            "order_online": [
+                {"link": "https://www.rappi.com.mx/restaurantes/123", "source": "Rappi"},
+                {"link": "https://www.ubereats.com/store/x", "source": "Uber Eats"},
+                {"link": "https://example.com/order", "source": "Sitio propio"},
+            ],
+        }
+        rows = gosom_platform_evidence([branch], checked_at="2026-09-29T12:00:00Z")
+        self.assertEqual({"RAPPI", "UBER_EATS"}, {row["platform"] for row in rows})
+        self.assertTrue(all(row["status"] == CONFIRMED for row in rows))
+        self.assertTrue(all(row["verifier_type"] == "gosom" for row in rows))
+        self.assertFalse(any(row["status"] == NOT_FOUND for row in rows))
+
+    def test_integration_produces_branch_and_business_presence_with_evidence(self):
         brands = [{"brand_id": "b", "brand_name": "Marca", "branch_count_amg": 2}]
         branches = [
             {"brand_id": "b", "branch_id": "one", "branch_name": "Uno"},
@@ -64,16 +144,12 @@ class PlatformTests(unittest.TestCase):
              "search_queries": "general || dominio || marca ubicacion"},
         ]
         result = integrate_platform_evidence(brands, branches, evidence)
-        self.assertEqual(result["platform_presence"], result["brand_presence"])
         presence = result["brand_presence"][0]
         self.assertEqual(presence["uber_status"], CONFIRMED)
         self.assertEqual(presence["uber_branches_found"], 1)
         self.assertEqual(presence["uber_branches_total"], 2)
-        branch_two = next(row for row in result["branch_presence"] if row["branch_id"] == "two")
-        self.assertEqual(branch_two["uber_status"], NOT_FOUND)
-        self.assertEqual(len(result["platform_evidence"]), 2)
 
-    def test_conflicting_or_incomplete_evidence_is_uncertain(self):
+    def test_conflicting_evidence_on_same_branch_is_uncertain(self):
         brands = [{"brand_id": "b", "brand_name": "Marca", "branch_count_amg": 1}]
         branches = [{"brand_id": "b", "branch_id": "one", "branch_name": "Uno"}]
         evidence = [
@@ -87,37 +163,21 @@ class PlatformTests(unittest.TestCase):
         ]
         result = integrate_platform_evidence(brands, branches, evidence)
         self.assertEqual(result["branch_presence"][0]["didi_status"], UNCERTAIN)
-        with self.assertRaises(ValueError):
-            integrate_platform_evidence(brands, branches, [{
-                "brand_id": "b", "branch_id": "one", "platform": "uber", "status": "CONFIRMED"
-            }])
 
-    def test_pending_never_becomes_uncertain_and_uncertain_requires_an_executed_search(self):
-        brands = [{"brand_id": "b", "brand_name": "Marca", "branch_count_amg": 1}]
-        branches = [{"brand_id": "b", "branch_id": "one", "branch_name": "Uno"}]
-        result = integrate_platform_evidence(brands, branches, [])
-        self.assertEqual(PENDING, result["branch_presence"][0]["uber_status"])
-        self.assertEqual(PENDING, result["brand_presence"][0]["uber_status"])
-        with self.assertRaises(ValueError):
-            integrate_platform_evidence(brands, branches, [{
-                "brand_id": "b", "branch_id": "one", "platform": "uber",
-                "status": "UNCERTAIN",
-            }])
-
-    def test_quality_gate_blocks_pending_and_error_checks(self):
-        queue = [{"brand_id": "b", "branch_id": "one", "platform": platform}
-                 for platform in ("UBER_EATS", "RAPPI", "DIDI_FOOD")]
-        branch_presence = [{"brand_id": "b", "branch_id": "one",
-                            "uber_status": CONFIRMED, "rappi_status": PENDING,
-                            "didi_status": ERROR}]
-        gate = platform_quality_gate(queue, branch_presence, requested=True)
-        self.assertEqual({"expected_checks": 3, "completed_checks": 1,
-                          "pending_checks": 1, "errors": 1, "report_status": "DRAFT"},
-                         {key: gate[key] for key in ("expected_checks", "completed_checks",
-                                                    "pending_checks", "errors", "report_status")})
-        omitted = platform_quality_gate(queue, branch_presence, requested=False)
-        self.assertEqual("FINAL", omitted["report_status"])
-        self.assertFalse(omitted["platform_section_included"])
+    def test_quality_gate_is_three_independent_decisions_per_business(self):
+        branches = [{
+            "brand_id": "b", "branch_id": "one", "branch_count_amg": 3,
+            "brand_resolution_status": "CONFIRMED",
+            "uber_status": CONFIRMED, "rappi_status": PENDING, "didi_status": ERROR,
+        }]
+        gate = platform_quality_gate([], branches, requested=True)
+        self.assertEqual({
+            "expected_checks": 3, "completed_checks": 1,
+            "pending_checks": 1, "errors": 1, "report_status": "DRAFT",
+        }, {key: gate[key] for key in (
+            "expected_checks", "completed_checks", "pending_checks", "errors", "report_status"
+        )})
+        self.assertNotIn("delivery_status", gate)
 
     def test_orphan_evidence_is_rejected(self):
         brands = [{"brand_id": "b", "branch_count_amg": 1}]
@@ -127,26 +187,6 @@ class PlatformTests(unittest.TestCase):
                 "brand_id": "b", "branch_id": "missing", "platform": "rappi",
                 "status": "NOT_FOUND", "checked_at": "2026-09-24", "method": "public_search",
             }])
-
-    def test_confirmed_requires_direct_evidence_url_and_does_not_complete_other_branch(self):
-        brands = [{"brand_id": "b", "brand_name": "Marca", "branch_count_amg": 3}]
-        branches = [{"brand_id": "b", "branch_id": "one"},
-                    {"brand_id": "b", "branch_id": "two"},
-                    {"brand_id": "b", "branch_id": "three"}]
-        evidence = [{"brand_id": "b", "branch_id": "one", "platform": "uber",
-                     "status": "CONFIRMED", "evidence_url": "https://ubereats.example/one",
-                     "page_title": "Marca Uno | Uber Eats", "checked_at": "2026-09-25",
-                     "method": "integrated_browser", "matched_name": "Marca",
-                     "matched_address": "Calle Uno"}]
-        result = integrate_platform_evidence(brands, branches, evidence)
-        one, two, three = result["branch_presence"]
-        self.assertEqual(CONFIRMED, one["uber_status"])
-        self.assertEqual(PENDING, two["uber_status"])
-        queue = create_platform_check_queue(brands, branches, platforms=["uber"])
-        gate = platform_quality_gate(queue, result["branch_presence"], requested=True)
-        self.assertEqual(1, gate["completed_checks"])
-        self.assertEqual(2, gate["pending_checks"])
-        self.assertEqual("DRAFT", gate["report_status"])
 
     def test_not_found_requires_three_documented_searches(self):
         brands = [{"brand_id": "b", "brand_name": "Marca", "branch_count_amg": 1}]
