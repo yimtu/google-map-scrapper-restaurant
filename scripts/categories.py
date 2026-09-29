@@ -74,13 +74,28 @@ def resolve_requested_categories(config: Mapping, requested: Iterable[str] | Non
     return result
 
 
+def _forms(value: str) -> set[str]:
+    normalized = normalize_name(value)
+    forms = {normalized} if normalized else set()
+    words = normalized.split()
+    if words:
+        last = words[-1]
+        variants = {last}
+        if len(last) > 4 and last.endswith("s"):
+            variants.add(last[:-1])
+        if len(last) > 5 and last.endswith("es"):
+            variants.add(last[:-2])
+        for variant in variants:
+            forms.add(" ".join([*words[:-1], variant]))
+    return {item for item in forms if item}
+
+
 def _contains(text: str, term: str) -> bool:
-    text, term = normalize_name(text), normalize_name(term)
-    if not text or not term:
+    text_forms, term_forms = _forms(text), _forms(term)
+    if not text_forms or not term_forms:
         return False
-    # Normalized phrase containment is intentional: Google categories are short
-    # labels ("Taquería", "Tienda de postres", etc.), not arbitrary prose.
-    return term in text
+    return any(term_form in text_form
+               for text_form in text_forms for term_form in term_forms)
 
 
 def classify_requested_relationship(row: Mapping, categories: Mapping) -> dict:
