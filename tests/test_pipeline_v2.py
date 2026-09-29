@@ -101,7 +101,7 @@ class PipelineV2Tests(unittest.TestCase):
                 "master_places.csv", "brands_master.csv", "prospects_3_20.csv", "watchlist_2.csv",
                 "large_21_plus.csv", "prospect_branches.csv", "platform_check_queue.csv",
                 "platform_presence.csv", "platform_evidence.csv", "report_traceability.json",
-                "metadata.json", "FoodScan_Report.pdf",
+                "metadata.json", "FoodScan_Report_DRAFT.pdf",
             }
             self.assertTrue(expected <= {path.name for path in snapshot.iterdir()})
             with (snapshot / "master_places.csv").open(encoding="utf-8-sig") as stream:
@@ -117,7 +117,8 @@ class PipelineV2Tests(unittest.TestCase):
                 self.assertEqual(9, len(list(csv.DictReader(stream))))
             trace = json.loads((snapshot / "report_traceability.json").read_text(encoding="utf-8"))
             self.assertFalse(trace["charts_enabled"])
-            self.assertEqual("FINAL", trace["report_status"])
+            self.assertEqual("DRAFT", trace["report_status"])
+            self.assertTrue(report["brand_expansion_pending"])
             self.assertEqual(0, trace["expected_checks"])
             self.assertFalse(trace["platform_evidence"]["included_in_report"])
 
