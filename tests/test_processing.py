@@ -46,12 +46,14 @@ class ProcessingTests(unittest.TestCase):
                 self.place(place_id='b', title='Dos', website='https://facebook.com/dos')]
         self.assertEqual(len(group_brands(deduplicate(rows))[1]), 2)
 
-    def test_exact_non_generic_name_can_form_watchlist_without_domain(self):
+    def test_exact_non_generic_name_never_forms_chain_without_independent_evidence(self):
         rows = [self.place(place_id='a', address='Uno 1'),
                 self.place(place_id='b', address='Dos 2')]
-        _, brands, _ = group_brands(deduplicate(rows))
-        self.assertEqual(1, len(brands))
-        self.assertEqual(2, brands[0]['branches_amg'])
+        _, brands, ambiguous = group_brands(deduplicate(rows))
+        self.assertEqual(2, len(brands))
+        self.assertTrue(all(b['branches_amg'] == 1 for b in brands))
+        self.assertEqual(1, len(ambiguous))
+        self.assertEqual('AMBIGUOUS', ambiguous[0]['resolution_status'])
         generic = [self.place(place_id='c', title='Cafetería', address='Tres 3'),
                    self.place(place_id='d', title='Cafetería', address='Cuatro 4')]
         self.assertEqual(2, len(group_brands(deduplicate(generic))[1]))
