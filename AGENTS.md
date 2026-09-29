@@ -7,7 +7,7 @@ Lee `README.md` y la ayuda real de `python foodscan.py <comando> --help`. Opera 
 ## Peticiones del usuario
 
 - **“Prepara FoodScan”**: detecta el sistema operativo, verifica Python, ejecuta `setup`, prepara Gosom y el navegador, crea la configuración local, inicializa SQLite y ejecuta `doctor`. El objetivo es `FoodScan Doctor: READY`.
-- **“Actualiza FoodScan”**: completa sin preguntas técnicas innecesarias doctor → territorio → plan → adquisición o reanudación → procesamiento → deduplicación → marcas → completar red de sucursales → segmentos → verificación web de plataformas TARGET → quality gate → CSV → PDF → resumen.
+- **“Actualiza FoodScan”**: completa doctor → territorio → plan inmutable → piloto de calibración (máximo 15 minutos) → presenta alcance, categorías, jobs, proxy, ETA base, ETA con presupuesto de expansión y política de fuente → espera aprobación humana explícita → adquisición o reanudación del plan aprobado → procesamiento → deduplicación → resolución conservadora de marcas → expansión dirigida de cadenas confirmadas 2–20 dentro del presupuesto aprobado → reprocesamiento → segmentos → verificación web de plataformas TARGET → quality gate → CSV → PDF → resumen.
 - **“Reanuda la corrida”**: consulta `status` y continúa el mismo snapshot con sus parámetros originales. No sustituyas una reanudación con una corrida nueva.
 - **“Compara este mes contra el anterior”**: ejecuta `compare`, comprueba que alcance y salud sean comparables y explica cambios y ausencias.
 
@@ -17,11 +17,11 @@ No preguntes al operador por zoom, depth, bbox, workers ni otros parámetros int
 
 No inventes territorios ni aprobación humana. Los polígonos sintéticos de pruebas nunca son territorio productivo. Si falta una capa requerida, informa `ONE-TIME HUMAN INPUT REQUIRED` y sigue `territory/README_TERRITORY.md`.
 
-Antes de una corrida mensual presenta alcance, puntos, consultas activas, trabajos estimados, batches, uso de proxy y versiones. Ejecuta primero la calibración prevista por el producto. No conviertas `setup`, un smoke test o un piloto en un censo productivo.
+Antes de una corrida mensual presenta alcance, puntos, consultas activas/categorías, trabajos estimados, batches, uso de proxy, versiones, ETA observada y presupuesto máximo de expansión. Ejecuta primero el piloto de calibración; nunca puede convertirse en un censo productivo y su límite de pared es 15 minutos. La corrida completa no inicia hasta que una persona apruebe explícitamente ese plan y confirme la política de fuente/licenciamiento. No apruebes en nombre del usuario ni modifiques silenciosamente un plan ya aprobado.
 
 No declares éxito porque terminó un subproceso. Revisa contenido, batches y `run_report.json`. Un volumen anormalmente bajo, CAPTCHA o fallos requiere diagnóstico. No automatices CAPTCHA ni presentes una corrida parcial como completa.
 
-Conserva los valores iniciales seguros definidos por FoodScan: navegador normal, concurrencia/pool/páginas conservadores y sin fast mode. Gosom es una dependencia externa; `update-gosom` es una acción deliberada. No uses Docker en la ruta normal.
+Conserva los valores iniciales seguros definidos por FoodScan: navegador normal, concurrencia/pool/páginas conservadores y sin fast mode. El piloto comienza en 1/1/1 y sólo puede recomendar el perfil balanceado 2/2/1 cuando no observa fallos; nunca escales automáticamente más allá del presupuesto aprobado. Gosom es una dependencia externa; `update-gosom` invalida el smoke anterior y exige uno nuevo. No uses Docker en la ruta normal.
 
 ## Datos, secretos y trazabilidad
 
@@ -31,7 +31,7 @@ No fusiones sucursales sólo por coordenadas compartidas, teléfono o dominio co
 
 Nunca solicites ni imprimas secretos en conversación. Las credenciales y proxies se introducen localmente y no deben aparecer en logs, CSV, reportes ni commits. Conserva snapshots y estado de reanudación; no los borres para ocultar errores.
 
-Después de modificar el producto, ejecuta las pruebas relevantes y revisa el diff. Distingue tests sintéticos, smoke real, piloto y corrida productiva.
+Después de modificar el producto, ejecuta la suite completa y revisa el diff. Distingue tests sintéticos, smoke real, piloto y corrida productiva. Los cambios críticos de identidad/marca deben conservar los gates adversariales; un nombre igual por sí solo nunca prueba que dos locales sean la misma cadena.
 
 ## Segmentos y reportes
 
@@ -72,4 +72,4 @@ Guarda evidencia incrementalmente y repite `verify-platforms` hasta completar el
 
 ## Criterio de terminación
 
-Una actualización termina cuando los batches requeridos están completos, los outputs son consistentes, la fase web TARGET alcanzó su estado permitido y el quality gate emitió `FINAL`. Si existe un bloqueo real, entrega DRAFT y enumera exactamente los checks pendientes o con error.
+Una actualización termina cuando el plan aprobado es el ejecutado, los batches base están completos, la expansión dirigida de marcas quedó completada o declarada no requerida dentro del presupuesto aprobado, los outputs son consistentes, la fase web TARGET alcanzó su estado permitido y el quality gate emitió `FINAL`. Si existe un bloqueo real o un presupuesto de expansión insuficiente, entrega DRAFT y enumera exactamente los checks pendientes o con error.
