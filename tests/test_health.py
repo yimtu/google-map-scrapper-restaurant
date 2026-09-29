@@ -8,7 +8,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.gosom import binary_path, install_browser, install_gosom
+from scripts.gosom import binary_path, patched_binary_path, install_browser, install_gosom
 from scripts.health import doctor
 
 
@@ -65,7 +65,7 @@ class HealthTests(unittest.TestCase):
             official = binary_path(root)
             official.unlink()
             (official.parent / "VERSION.json").unlink()
-            patched = root / "tools" / "gosom-foodscan" / "gosom-foodscan.exe"
+            patched = patched_binary_path(root)
             patched.parent.mkdir(parents=True)
             patched.write_bytes(b"published patched binary")
             digest = hashlib.sha256(patched.read_bytes()).hexdigest()
