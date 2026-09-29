@@ -72,6 +72,9 @@ class HealthTests(unittest.TestCase):
             (patched.parent / "VERSION.json").write_text(json.dumps({
                 "version": "0.1.0", "upstream_gosom_version": "v1.18.1", "sha256": digest,
             }))
+            smoke = json.loads((root / ".runtime" / "smoke-latest.json").read_text())
+            smoke["gosom_sha256"] = digest
+            (root / ".runtime" / "smoke-latest.json").write_text(json.dumps(smoke))
             with patch("scripts.health.request", return_value=_Response()):
                 report = doctor(root)
             self.assertTrue(report["ready"], report)
