@@ -93,6 +93,14 @@ def classify_requested_relationship(row: Mapping, categories: Mapping) -> dict:
     """
     rules = categories.get("requested_category_rules") or {}
     requested = list(categories.get("requested_categories") or rules)
+    if not requested:
+        return {
+            "requested_categories": [],
+            "matched_requested_categories": [],
+            "category_relationship": UNCLASSIFIED,
+            "category_evidence": "requested_universe_not_defined",
+            "category_rule_version": "2",
+        }
     google_values = [
         str(row.get("google_category") or row.get("category") or "")
     ] + _list(row.get("google_categories") or row.get("categories"))
