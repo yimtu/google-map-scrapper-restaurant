@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -77,31 +78,8 @@ def command_territory(args) -> int:
     return 0
 
 
-def build_plan(scope: str, destination: Path, *, pilot: bool = False, month: str | None = None) -> dict:
-    from scripts.grid import generate_grid, write_grid
-    from scripts.queries import make_jobs, write_batches
-    from scripts.territory import load_territory
-    territory_path = ROOT / "territory" / "processed" / "territory.geojson"
-    territory = load_territory(territory_path)
-    coverage = read_json(ROOT / "config" / "coverage.json")
-    categories = read_json(ROOT / "config" / "categories.json")
-    settings = read_json(ROOT / "config" / "settings.json")
-    points = generate_grid(territory, coverage, scope=scope)
-    if pilot:
-        grouped: dict[str, list] = {}
-        for point in points:
-            grouped.setdefault(point.get("density", point.get("zone", "other")), []).append(point)
-        selected = []
-        for values in grouped.values():
-            selected.extend(values[: max(1, 15 // max(1, len(grouped)))])
-        points = selected[:20] or points[:20]
-    destination.mkdir(parents=True, exist_ok=True)
-    write_grid(points, destination / "grid.csv", destination / "grid_preview.geojson")
-    jobs = make_jobs(points, categories, pilot=pilot)
-    batches = write_batches(jobs, destination / "batches", int(settings.get("batch_size", 50)))
-    for batch in batches:
-        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.csv").resolve())
-        batch["status"] = "planned"
+def _gosom_identity() -> tuple[str | None, str | None]:
+    from scripts.gosom import active_binary_path, sha256
     patched_version = ROOT / "tools" / "gosom-foodscan" / "VERSION.json"
     official_version = ROOT / "tools" / "gosom" / "VERSION.json"
     if patched_version.exists():
@@ -109,58 +87,164 @@ def build_plan(scope: str, destination: Path, *, pilot: bool = False, month: str
         version = details.get("upstream_gosom_version", "unknown") + "+foodscan-patch"
     else:
         version = read_json(official_version).get("version") if official_version.exists() else None
+    try:
+        active = active_binary_path(ROOT)
+        digest = sha256(active) if active.is_file() else None
+    except (OSError, ValueError, KeyError):
+        digest = None
+    return version, digest
+
+
+def build_plan(scope: str, destination: Path, *, month: str | None = None) -> dict:
+    from scripts.grid import generate_grid, write_grid
+    from scripts.queries import make_jobs, write_batches
+    from scripts.planning import attach_plan_identity, methodology_hash, plan_payload
+
+    territory_path = ROOT / "territory" / "processed" / "territory.geojson"
+    from scripts.territory import load_territory
+    territory = load_territory(territory_path)
+    coverage = read_json(ROOT / "config" / "coverage.json")
+    categories = read_json(ROOT / "config" / "categories.json")
+    settings = read_json(ROOT / "config" / "settings.json")
+    points = generate_grid(territory, coverage, scope=scope)
+    jobs = make_jobs(points, categories, pilot=False)
+
+    destination.mkdir(parents=True, exist_ok=True)
+    write_grid(points, destination / "grid.csv", destination / "grid_preview.geojson")
+    batches = write_batches(jobs, destination / "batches", int(settings.get("batch_size", 25)))
+    for batch in batches:
+        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.csv").resolve())
+        batch["status"] = "planned"
+
+    version, binary_sha = _gosom_identity()
     proxy_file = ROOT / "config" / "secrets" / "proxies.txt"
     proxy_enabled = proxy_file.exists() and any(
         line.strip() and not line.lstrip().startswith("#")
         for line in proxy_file.read_text(encoding="utf-8").splitlines()
     )
-    frozen = {"coverage": coverage, "categories": categories, "settings": settings,
-              "territory_sha256": hashlib.sha256(territory_path.read_bytes()).hexdigest()}
-    run_id = f"{'pilot' if pilot else month}-{scope}"
-    manifest = {"run_id": run_id, "month": month, "scope": scope, "kind": "pilot" if pilot else "monthly",
-                "created_at": datetime.now(timezone.utc).isoformat(), "status": "planned",
-                "platform_verification_requested": not pilot,
-                "gosom_version": version, "proxy_enabled": proxy_enabled,
-                "grid_points": len(points), "jobs": len(jobs),
-                "batches": batches, "frozen_config": frozen}
+    territory_sha = hashlib.sha256(territory_path.read_bytes()).hexdigest()
+    frozen = {
+        "coverage": coverage,
+        "categories": categories,
+        "settings": settings,
+        "territory_sha256": territory_sha,
+    }
+    run_id = f"{month}-{scope}" if month else f"plan-{scope}"
+    manifest = {
+        "run_id": run_id,
+        "month": month,
+        "scope": scope,
+        "kind": "monthly",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "planned",
+        "platform_verification_requested": True,
+        "gosom_version": version,
+        "gosom_sha256": binary_sha,
+        "proxy_enabled": proxy_enabled,
+        "grid_points": len(points),
+        "jobs": len(jobs),
+        "batches": batches,
+        "frozen_config": frozen,
+        "calibration": None,
+    }
+    payload = plan_payload(
+        scope=scope, territory_sha256=territory_sha, coverage=coverage, categories=categories,
+        settings=settings, grid_points=points, jobs=jobs, gosom_version=version,
+        gosom_sha256=binary_sha, code_commit=None,
+    )
+    attach_plan_identity(manifest, payload)
+    manifest["methodology_hash"] = methodology_hash(manifest)
     write_json(destination / "run_manifest.json", manifest)
     return manifest
 
 
+def _manifest_path(value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    if path.is_dir():
+        path = path / "run_manifest.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"No existe el plan: {path}")
+    return path.resolve()
+
+
 def print_plan(manifest: dict) -> None:
+    from scripts.planning import human_duration
+    categories = manifest.get("frozen_config", {}).get("categories", {})
+    active = categories.get("active_queries") or []
+    calibration = manifest.get("calibration") or {}
+    eta = calibration.get("eta") or {}
+    print(f"Plan: {manifest.get('plan_id', 'sin-id')}")
     print(f"Scope: {manifest['scope']}")
     print(f"Grid points: {manifest['grid_points']}")
     print(f"Jobs estimados: {manifest['jobs']}")
     print(f"Batches: {len(manifest['batches'])}")
+    print(f"Consultas activas ({len(active)}): {', '.join(active) if active else 'perfil completo'}")
+    print(f"Proxy: {'CONFIGURED' if manifest.get('proxy_enabled') else 'NOT CONFIGURED'}")
     print(f"Gosom: {manifest.get('gosom_version') or 'NO INSTALADO'}")
+    if eta.get("available"):
+        print(f"ETA estimada: {human_duration(eta.get('eta_low_seconds'))}–{human_duration(eta.get('eta_high_seconds'))}")
+    else:
+        print("ETA estimada: pendiente de piloto")
+    approval = manifest.get("approval") or {}
+    print(f"Aprobación: {'APROBADO' if approval.get('approved') else 'PENDIENTE'}")
 
 
 def command_plan(args) -> int:
-    manifest = build_plan(args.scope, ROOT / "generated", pilot=False,
-                          month=month_value(args.month))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    destination = ROOT / "generated" / "plans" / f"{stamp}-{args.scope}"
+    manifest = build_plan(args.scope, destination, month=month_value(args.month))
     print_plan(manifest)
+    print(f"Plan guardado: {destination / 'run_manifest.json'}")
+    print("Siguiente paso: ejecutar el piloto de calibración sobre este plan.")
     return 0
 
 
-def command_pilot(args) -> int:
-    from scripts.runner import execute_manifest
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    destination = ROOT / "generated" / "pilots" / stamp
-    manifest = build_plan(args.scope, destination, pilot=True)
-    print_plan(manifest)
-    if args.plan_only:
-        return 0
-    result = execute_manifest(ROOT, destination / "run_manifest.json")
-    yields = create_query_yield(result, destination)
-    result["query_yield"] = yields
-    write_json(destination / "run_manifest.json", result)
-    return 0 if result["status"] == "completed" else 3
+def _pilot_from_plan(plan_path: Path, destination: Path) -> dict:
+    from scripts.queries import write_batches
+    from scripts.planning import stratified_pilot_jobs
+
+    source = read_json(plan_path)
+    settings = source.get("frozen_config", {}).get("settings", {})
+    jobs = [dict(job) for batch in source.get("batches", []) for job in batch.get("jobs", [])]
+    selected = stratified_pilot_jobs(
+        jobs,
+        max_jobs=int(settings.get("pilot_max_jobs", 18)),
+        query_limit=int(settings.get("pilot_query_limit", 6)),
+    )
+    batches = write_batches(selected, destination / "batches", int(settings.get("batch_size", 25)))
+    for batch in batches:
+        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.csv").resolve())
+        batch["status"] = "planned"
+    run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-pilot-{source['scope']}"
+    pilot = {
+        "run_id": run_id,
+        "month": source.get("month"),
+        "scope": source["scope"],
+        "kind": "pilot",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "planned",
+        "source_plan_id": source.get("plan_id"),
+        "source_plan_sha256": source.get("plan_sha256"),
+        "platform_verification_requested": False,
+        "gosom_version": source.get("gosom_version"),
+        "gosom_sha256": source.get("gosom_sha256"),
+        "proxy_enabled": source.get("proxy_enabled", False),
+        "grid_points": len({job.get("point_id") for job in selected}),
+        "jobs": len(selected),
+        "batches": batches,
+        "frozen_config": source.get("frozen_config", {}),
+    }
+    write_json(destination / "run_manifest.json", pilot)
+    return pilot
 
 
 def create_query_yield(manifest: dict, destination: Path) -> list[dict]:
     from scripts.dedupe import identity
     from scripts.exports import write_csv
     from scripts.normalize import normalize_record, read_raw
+
     job_to_query = {str(job["job_id"]): job["query"]
                     for batch in manifest.get("batches", []) for job in batch.get("jobs", [])}
     records: dict[str, list[dict]] = {query: [] for query in dict.fromkeys(job_to_query.values())}
@@ -168,25 +252,114 @@ def create_query_yield(manifest: dict, destination: Path) -> list[dict]:
     for batch in manifest.get("batches", []):
         for job_id in batch.get("pending_job_ids", []):
             query = job_to_query.get(str(job_id))
-            if query: failed[query] += 1
+            if query:
+                failed[query] += 1
         raw = Path(batch.get("raw_file", ""))
         if raw.is_file():
             for row in read_raw(raw):
                 query = job_to_query.get(str(row.get("input_id", row.get("input", ""))))
-                if query: records[query].append(normalize_record(row))
-    seen: set[str] = set()
+                if query:
+                    records[query].append(normalize_record(row))
+
+    sets = {query: {identity(row) for row in rows} for query, rows in records.items()}
+    all_places = set().union(*sets.values()) if sets else set()
     result = []
     for query, rows in records.items():
-        unique = {identity(row) for row in rows}
-        new = unique - seen
-        result.append({"query": query, "raw_results": len(rows), "unique_places": len(unique),
-                       "new_unique_places": len(new),
-                       "marginal_yield_pct": round(100 * len(new) / max(1, len(seen)), 3),
-                       "jobs_failed": failed[query]})
-        seen.update(unique)
+        others = set().union(*(values for name, values in sets.items() if name != query)) if len(sets) > 1 else set()
+        exclusive = sets[query] - others
+        result.append({
+            "query": query,
+            "raw_results": len(rows),
+            "unique_places": len(sets[query]),
+            "exclusive_places": len(exclusive),
+            "exclusive_contribution_pct": round(100 * len(exclusive) / max(1, len(all_places)), 3),
+            "overlap_pct": round(100 * (len(sets[query]) - len(exclusive)) / max(1, len(sets[query])), 3),
+            "jobs_failed": failed[query],
+        })
     write_csv(destination / "query_yield.csv", result)
     write_csv(ROOT / "generated" / "query_yield.csv", result)
     return result
+
+
+def command_pilot(args) -> int:
+    from scripts.runner import execute_manifest
+    from scripts.planning import estimate_run, summarize_pilot
+
+    plan_path = _manifest_path(args.plan)
+    source = read_json(plan_path)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    destination = ROOT / "generated" / "pilots" / f"{stamp}-{source['scope']}"
+    pilot = _pilot_from_plan(plan_path, destination)
+    print_plan({**source, "jobs": pilot["jobs"], "grid_points": pilot["grid_points"],
+                "batches": pilot["batches"], "approval": {"approved": False}})
+    if args.plan_only:
+        return 0
+    result = execute_manifest(ROOT, destination / "run_manifest.json")
+    result["query_yield"] = create_query_yield(result, destination)
+    calibration = summarize_pilot(result)
+    settings = source.get("frozen_config", {}).get("settings", {})
+    safe_concurrency = int(settings.get("concurrency", 1))
+    if calibration["failure_rate"] == 0 and calibration["jobs_completed"] >= max(1, pilot["jobs"] // 2):
+        recommended_concurrency = min(
+            int(settings.get("balanced_concurrency", 2)),
+            max(1, safe_concurrency + 1),
+        )
+    else:
+        recommended_concurrency = safe_concurrency
+    calibration["recommended_concurrency"] = recommended_concurrency
+    calibration["eta"] = estimate_run(
+        jobs=int(source.get("jobs", 0)),
+        seconds_per_job=calibration.get("seconds_per_job"),
+        concurrency=recommended_concurrency,
+        uncertainty_pct=float(settings.get("eta_uncertainty_pct", 20)),
+    )
+    result["calibration"] = calibration
+    write_json(destination / "run_manifest.json", result)
+
+    source["calibration"] = calibration
+    write_json(plan_path, source)
+    print(f"Piloto: {calibration['jobs_completed']}/{calibration['jobs_total']} jobs, "
+          f"{calibration.get('seconds_per_job') or 'n/a'} s/job")
+    print_plan(source)
+    print(f"Plan actualizado: {plan_path}")
+    print("La corrida completa sigue bloqueada hasta aprobación explícita.")
+    return 0 if result["status"] == "completed" else 3
+
+
+def command_approve(args) -> int:
+    from scripts.planning import approve_manifest
+    path = _manifest_path(args.plan)
+    manifest = read_json(path)
+    if not (manifest.get("calibration") or {}).get("eta", {}).get("available"):
+        raise RuntimeError("No se aprueba una corrida grande sin piloto y ETA disponibles")
+    approve_manifest(manifest)
+    write_json(path, manifest)
+    print_plan(manifest)
+    print("Plan aprobado. La corrida completa puede ejecutarse exactamente con este plan.")
+    return 0
+
+
+def _materialize_plan(plan_path: Path, destination: Path) -> Path:
+    plan = read_json(plan_path)
+    destination.mkdir(parents=True, exist_ok=True)
+    batches_dir = destination / "batches"
+    batches_dir.mkdir(parents=True, exist_ok=True)
+    materialized = dict(plan)
+    materialized["run_id"] = f"{plan.get('month')}-{plan['scope']}-{plan.get('plan_id', 'plan')}"
+    materialized["status"] = "planned"
+    materialized["batches"] = []
+    for source_batch in plan.get("batches", []):
+        batch = dict(source_batch)
+        source_input = Path(source_batch["input"])
+        target_input = batches_dir / source_input.name
+        shutil.copyfile(source_input, target_input)
+        batch["input"] = str(target_input.resolve())
+        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.csv").resolve())
+        batch["status"] = "planned"
+        materialized["batches"].append(batch)
+    path = destination / "run_manifest.json"
+    write_json(path, materialized)
+    return path
 
 
 def finish_snapshot(path: Path) -> dict:
@@ -199,25 +372,34 @@ def finish_snapshot(path: Path) -> dict:
 
 def command_monthly(args) -> int:
     from scripts.runner import execute_manifest
-    month = month_value(args.month)
+    from scripts.planning import verify_approval
+
+    plan_path = _manifest_path(args.plan)
+    plan = read_json(plan_path)
+    verify_approval(plan)
+    month = month_value(plan.get("month") or args.month)
     destination = ROOT / "snapshots" / month
     manifest_path = destination / "run_manifest.json"
     if manifest_path.exists():
         existing = read_json(manifest_path)
+        if existing.get("plan_sha256") != plan.get("plan_sha256"):
+            raise RuntimeError("El snapshot existente pertenece a otro plan; no se mezcla")
         if existing.get("status") == "completed":
             raise ValueError(f"El snapshot {month} ya está completo; no se sobrescribe")
-        manifest = existing
     else:
-        manifest = build_plan(args.scope, destination, month=month)
+        manifest_path = _materialize_plan(plan_path, destination)
+    manifest = read_json(manifest_path)
     print_plan(manifest)
     if args.plan_only:
         return 0
+
     from scripts.health import doctor
     health = doctor(ROOT)
     if not health.get("ready"):
         failed = ", ".join(item["name"] for item in health["checks"]
                            if item.get("required", True) and not item.get("ok"))
         raise RuntimeError(f"La corrida mensual no inicia hasta resolver doctor: {failed}")
+
     result = execute_manifest(ROOT, manifest_path)
     if result["status"] == "completed":
         report = finish_snapshot(destination)
@@ -227,34 +409,40 @@ def command_monthly(args) -> int:
             return 3
         print(f"Snapshot completo: {destination}")
         return 0
-    print("Corrida incompleta. Usa: foodscan resume")
+    print("Corrida incompleta. Usa: foodscan resume --run <ruta-del-snapshot>")
     return 3
 
 
 def command_resume(args) -> int:
     from scripts.runner import execute_manifest, latest_manifest
-    path = latest_manifest(ROOT, args.month)
+    path = _manifest_path(args.run) if args.run else latest_manifest(ROOT, args.month)
     result = execute_manifest(ROOT, path)
-    if result["status"] == "completed":
+    if result["status"] == "completed" and path.parent.parent.name == "snapshots":
         report = finish_snapshot(path.parent)
         if report.get("report_status") == "DRAFT":
             print(f"Adquisición completa; verificación de plataformas pendiente: {path.parent}")
-            print(f"Ejecuta: foodscan verify-platforms --month {report.get('month', path.parent.name)}")
             return 3
-        print(f"Corrida completada: {path.parent}")
-        return 0
-    print("Aún quedan trabajos pendientes; revisa logs y ejecuta resume de nuevo.")
-    return 3
+    print(f"{result['run_id']}: {result['status']}")
+    return 0 if result["status"] == "completed" else 3
 
 
 def command_status(args) -> int:
     from scripts.runner import batch_progress, latest_manifest
-    manifest = read_json(latest_manifest(ROOT, args.month))
+    path = _manifest_path(args.run) if args.run else latest_manifest(ROOT, args.month)
+    manifest = read_json(path)
     done = total = 0
+    elapsed = 0.0
     for batch in manifest["batches"]:
         batch_done, batch_total, _ = batch_progress(batch)
-        done += batch_done; total += batch_total
-    print(f"{manifest['run_id']}: {manifest['status']} — {done}/{total} jobs")
+        done += batch_done
+        total += batch_total
+        elapsed += float(batch.get("elapsed_seconds", 0) or 0)
+    rate = done / elapsed if elapsed > 0 else 0
+    remaining = total - done
+    eta = remaining / rate if rate > 0 else None
+    from scripts.planning import human_duration
+    print(f"{manifest['run_id']}: {manifest['status']} — {done}/{total} jobs"
+          + (f" — ETA {human_duration(eta)}" if eta is not None else ""))
     return 0
 
 
@@ -277,7 +465,9 @@ def command_compare(args) -> int:
         raise ValueError("Los snapshots tienen alcances distintos y no son comparables")
     if previous_report.get("incomplete") or current_report.get("incomplete"):
         raise ValueError("No se comparan snapshots incompletos como si fueran censos completos")
-    changes = compare_snapshots(months[-1], current)
+    if previous_report.get("methodology_hash") != current_report.get("methodology_hash"):
+        raise ValueError("Los snapshots tienen distinta metodología; no se presentan como tendencia directa")
+    compare_snapshots(months[-1], current)
     print(f"Comparación creada: {current / 'changes.csv'}")
     return 0
 
@@ -295,7 +485,6 @@ def command_proxy(args) -> int:
         return 0
     configured = any(x.strip() and not x.lstrip().startswith("#") for x in path.read_text(encoding="utf-8").splitlines())
     print(f"Proxy: {'CONFIGURED' if configured else 'OPTIONAL / NOT CONFIGURED'}")
-    print(f"Archivo local: {path}")
     return 0
 
 
@@ -303,7 +492,9 @@ def command_update(_args) -> int:
     from scripts.gosom import has_foodscan_asset, install_foodscan_gosom, install_gosom
     metadata = (install_foodscan_gosom(ROOT, update=True) if has_foodscan_asset(ROOT)
                 else install_gosom(ROOT, update=True))
-    print(f"Gosom actualizado y validado: {metadata['version']}")
+    # Any previous smoke is tied to the old binary and must not certify the new one.
+    (ROOT / ".runtime" / "smoke-latest.json").unlink(missing_ok=True)
+    print(f"Gosom actualizado y validado: {metadata['version']}. Ejecuta setup/doctor para un smoke nuevo.")
     return 0
 
 
@@ -313,7 +504,6 @@ def command_verify_platforms(args) -> int:
     report = verify_platforms(ROOT, snapshot, evidence_path=args.evidence)
     print(report["platform_verification_progress"])
     print(f"Report status: {report['report_status']}")
-    print(f"Queue: {snapshot / 'platform_check_queue.csv'}")
     if report["report_status"] == "DRAFT":
         print(f"Pendientes: {report['pending_checks']}; errores: {report['errors']}")
         return 3
@@ -325,29 +515,63 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(prog="foodscan", description="Censo mensual FoodScan AMG")
     commands = result.add_subparsers(dest="command", required=True)
     for name, function in (("setup", command_setup), ("doctor", command_doctor),
-                           ("status", command_status),
-                           ("update-gosom", command_update)):
-        item = commands.add_parser(name); item.set_defaults(function=function)
-        if name == "status": item.add_argument("--month")
-    item = commands.add_parser("proxy"); item.set_defaults(function=command_proxy)
-    item.add_argument("--configure", action="store_true", help="pedir y guardar una URL mediante entrada oculta")
-    item = commands.add_parser("territory"); item.set_defaults(function=command_territory)
-    item.add_argument("--file"); item.add_argument("--scope", choices=["CORE_GDL", "AMG_FULL"])
+                           ("status", command_status), ("update-gosom", command_update)):
+        item = commands.add_parser(name)
+        item.set_defaults(function=function)
+        if name == "status":
+            item.add_argument("--month")
+            item.add_argument("--run")
+
+    item = commands.add_parser("proxy")
+    item.set_defaults(function=command_proxy)
+    item.add_argument("--configure", action="store_true")
+
+    item = commands.add_parser("territory")
+    item.set_defaults(function=command_territory)
+    item.add_argument("--file")
+    item.add_argument("--scope", choices=["CORE_GDL", "AMG_FULL"])
     item.add_argument("--density", choices=["high", "medium", "periphery", "rural"], default="high")
-    item.add_argument("--approve", action="store_true"); item.add_argument("--allow-unapproved", action="store_true")
-    for name, function in (("plan", command_plan), ("pilot", command_pilot), ("monthly", command_monthly)):
-        item = commands.add_parser(name); item.set_defaults(function=function)
-        item.add_argument("--scope", choices=["CORE_GDL", "AMG_FULL"], default="AMG_FULL")
-        item.add_argument("--month")
-        if name in ("pilot", "monthly"): item.add_argument("--plan-only", action="store_true")
-    item = commands.add_parser("resume"); item.set_defaults(function=command_resume); item.add_argument("--month")
-    item = commands.add_parser("export"); item.set_defaults(function=command_export); item.add_argument("--month")
-    item = commands.add_parser("compare"); item.set_defaults(function=command_compare); item.add_argument("--month")
+    item.add_argument("--approve", action="store_true")
+    item.add_argument("--allow-unapproved", action="store_true")
+
+    item = commands.add_parser("plan")
+    item.set_defaults(function=command_plan)
+    item.add_argument("--scope", choices=["CORE_GDL", "AMG_FULL"], default="AMG_FULL")
+    item.add_argument("--month")
+
+    item = commands.add_parser("pilot")
+    item.set_defaults(function=command_pilot)
+    item.add_argument("--plan", required=True)
+    item.add_argument("--plan-only", action="store_true")
+
+    item = commands.add_parser("approve")
+    item.set_defaults(function=command_approve)
+    item.add_argument("--plan", required=True)
+
+    item = commands.add_parser("monthly")
+    item.set_defaults(function=command_monthly)
+    item.add_argument("--plan", required=True)
+    item.add_argument("--month")
+    item.add_argument("--plan-only", action="store_true")
+
+    item = commands.add_parser("resume")
+    item.set_defaults(function=command_resume)
+    item.add_argument("--month")
+    item.add_argument("--run")
+
+    item = commands.add_parser("export")
+    item.set_defaults(function=command_export)
+    item.add_argument("--month")
+
+    item = commands.add_parser("compare")
+    item.set_defaults(function=command_compare)
+    item.add_argument("--month")
+
     item = commands.add_parser("verify-platforms")
     item.set_defaults(function=command_verify_platforms)
-    item.add_argument("--month", help="snapshot mensual YYYY-MM")
-    item.add_argument("--snapshot", help="ruta explícita del snapshot")
-    item.add_argument("--evidence", help="CSV de evidencia producido por el agente")
+    item.add_argument("--month")
+    item.add_argument("--snapshot")
+    item.add_argument("--evidence")
     return result
 
 
