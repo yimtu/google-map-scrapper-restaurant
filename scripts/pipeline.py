@@ -54,6 +54,9 @@ def history(snapshot, manifest):
         info = json.loads(report.read_text(encoding='utf-8'))
         if info.get('scope') != manifest.get('scope') or info.get('incomplete', True):
             continue
+        current_method = manifest.get('methodology_hash')
+        if not current_method or info.get('methodology_hash') != current_method:
+            continue
         rows = json.loads(canonical.read_text(encoding='utf-8'))
         historical_ids.update(str(row.get('record_id') or identity(row)) for row in rows)
         previous = rows
