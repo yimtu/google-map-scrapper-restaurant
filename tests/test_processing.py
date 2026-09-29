@@ -64,6 +64,23 @@ class ProcessingTests(unittest.TestCase):
                   self.place(place_id='h', title='La Casa', address='Ocho 8')]
         self.assertEqual(2, len(group_brands(deduplicate(common))[1]))
 
+    def test_confirmed_chain_never_absorbs_same_name_row_without_own_evidence(self):
+        rows = [
+            self.place(place_id='a', title='Marca Precisa', address='Uno',
+                       website='https://marca.example/a'),
+            self.place(place_id='b', title='Marca Precisa', address='Dos',
+                       website='https://marca.example/b'),
+            self.place(place_id='c', title='Marca Precisa', address='Tres'),
+        ]
+        _, brands, ambiguous = group_brands(deduplicate(rows))
+        counts = sorted(b['branches_amg'] for b in brands)
+        self.assertEqual([1, 2], counts)
+        confirmed = [b for b in brands if b['brand_resolution_status'] == 'CONFIRMED']
+        self.assertEqual(1, len(confirmed))
+        self.assertEqual(2, confirmed[0]['branches_amg'])
+        self.assertEqual(1, len(ambiguous))
+        self.assertEqual(1, ambiguous[0]['candidate_count'])
+
     def test_459_adversarial_same_name_pairs_never_auto_merge(self):
         # Code-level 99/1 regression gate for the forbidden same-name-only merge.
         for index in range(459):
