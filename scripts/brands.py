@@ -77,13 +77,12 @@ def group_brands(rows):
 
         if name and name not in GENERIC_NAMES and len(members) > 1 and len(hosts) == 1:
             host = next(iter(hosts))
-            # Every member must either explicitly carry the shared private domain
-            # or have no website. A conflicting private domain forbids the merge.
-            conflicting = {
-                domain(row.get("website", "")) for row in members
-                if domain(row.get("website", "")) and domain(row.get("website", "")) != host
-            }
-            if not conflicting:
+            explicit_host_members = [
+                row for row in members if domain(row.get("website", "")) == host
+            ]
+            # Precision-first: at least two distinct establishments must independently
+            # carry the same private domain. One website plus same-name rows is not enough.
+            if len(explicit_host_members) >= 2:
                 groups.append(("confirmed", ("domain_name", host, name), members))
                 continue
 
