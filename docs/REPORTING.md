@@ -1,37 +1,46 @@
-# Reportes y quality gate
+# Reporte único y quality gate
 
-FoodScan separa los datos técnicos de las salidas comerciales. Los CSV conservan la trazabilidad; el PDF resume los prospectos sin ocultar verificaciones incompletas.
+El entregable humano canónico de FoodScan es un solo PDF. Los CSV, JSONL y SQLite son soportes técnicos y nunca sustituyen al PDF.
 
-## Archivos principales
+## Qué conserva FoodScan
 
-- `prospects_3_20.csv`: una fila comercial por marca TARGET.
-- `watchlist_2.csv`: marcas con dos sucursales observadas.
-- `prospect_branches.csv`: ubicaciones TARGET.
-- `platform_presence.csv`: estado agregado por marca y plataforma.
-- `platform_evidence.csv`: evidencia por sucursal y plataforma.
-- `run_report.json`: resultado de la ejecución.
-- `report_traceability.json`: procedencia de KPIs y tablas.
+Una query de Gosom no es un filtro duro. Cada establecimiento dentro del territorio se conserva y se clasifica como:
 
-Los estados técnicos no se muestran al usuario. Las salidas comerciales utilizan únicamente **Sí**, **No confirmada** y **Requiere revisión**.
+- `REQUESTED`: pertenece al universo solicitado.
+- `ADDITIONAL`: Google lo devolvió aunque su categoría explícita queda fuera del universo pedido.
+- `UNCLASSIFIED`: la categoría disponible no permite decidir con seguridad.
+
+Los hallazgos adicionales y no clasificados **no se eliminan**. Se reportan por separado y no inflan los KPIs de categorías solicitadas.
+
+## Contenido obligatorio del PDF
+
+El PDF tiene longitud dinámica y debe incluir:
+
+1. alcance aprobado, categorías solicitadas y queries derivadas;
+2. cascada de adquisición: raw → únicos → REQUESTED → ADDITIONAL → UNCLASSIFIED → marcas;
+3. todos los negocios confirmados con 3+ locales;
+4. tres columnas independientes: Uber Eats, Rappi y DiDi Food;
+5. todos los locales observados de cada negocio 3+;
+6. directorio completo REQUESTED;
+7. Hallazgos adicionales;
+8. No clasificados;
+9. metodología, warnings y trazabilidad.
+
+No existe límite de 3 páginas. No existe top-18 ni top-12.
+
+## Plataformas
+
+La selección de plataformas es por negocio, no por un campo combinado de delivery. Toda marca confirmada con 3+ locales observados entra al gate, sin importar giro ni tamaño máximo.
+
+- Una evidencia positiva de una sucursal resuelve `Sí` para ese negocio/plataforma.
+- `No confirmada` requiere haber agotado las búsquedas necesarias sin evidencia positiva.
+- `Requiere revisión` cubre ambigüedad o una comprobación que no pudo resolverse limpiamente.
+- Falta de dato nunca equivale a No.
 
 ## Quality gate
 
-Cuando la verificación de plataformas forma parte de la corrida, FoodScan registra:
+Cuando la verificación de plataformas pertenece a la corrida, FoodScan cuenta **una decisión por negocio × plataforma**. Para N negocios confirmados 3+, existen exactamente `N × 3` decisiones esperadas.
 
-```text
-expected_checks
-completed_checks
-pending_checks
-errors
-report_status
-```
+`FoodScan_Report.pdf` sólo se genera como FINAL cuando no queda ninguna decisión requerida PENDING o ERROR. En otro caso el máximo entregable es `FoodScan_Report_DRAFT.pdf`.
 
-`FoodScan_Report.pdf` sólo se genera con `report_status = FINAL`, después de completar todos los checks esperados sin pendientes ni errores. Si falta cualquier comprobación requerida, el máximo entregable es `FoodScan_Report_DRAFT.pdf`, acompañado por el detalle interno del bloqueo.
-
-Si la verificación de plataformas no fue solicitada ni pertenece a la corrida, el PDF omite esa sección completamente. No llena huecos con estados ambiguos.
-
-## Interpretación
-
-El conteo de sucursales refleja lo observado dentro del territorio y las búsquedas ejecutadas. No demuestra el tamaño nacional de una marca. Una ausencia mensual se reporta como `missing_this_run`; un cierre requiere evidencia explícita.
-
-`run_report.json`, `metadata.json` y `report_traceability.json` permiten reconstruir las cifras del PDF. Antes de usar los resultados comercialmente, revisa el alcance, la salud de la adquisición, el estado del gate y las advertencias.
+`run_report.json`, `metadata.json` y `report_traceability.json` permiten reconstruir las cifras y las tablas del PDF.
