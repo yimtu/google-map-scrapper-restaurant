@@ -28,7 +28,7 @@ class RunnerTests(unittest.TestCase):
             manifest_path.write_text(json.dumps({
                 "run_id": "2026-09-AMG_FULL", "scope": "AMG_FULL", "month": "2026-09",
                 "status": "planned", "batches": [{"batch_id": "batch_001", "input": str(input_file),
-                "raw_file": str(raw), "depth": 5, "jobs": [{"job_id": "JOB_A"}]}]
+                "raw_file": str(raw), "depth": 5, "jobs": [{"job_id": "JOB_A", "url": "https://example.invalid"}]}]
             }))
 
             def fake_run(args, **kwargs):
@@ -70,7 +70,7 @@ class RunnerTests(unittest.TestCase):
                 }},
                 "batches": [{"batch_id": "batch_001", "input": str(input_file),
                              "raw_file": str(raw), "depth": 5,
-                             "jobs": [{"job_id": "JOB_A"}]}],
+                             "jobs": [{"job_id": "JOB_A", "url": "https://example.invalid"}]}],
             }))
 
             def fake_run(args, **kwargs):
@@ -103,7 +103,7 @@ class RunnerTests(unittest.TestCase):
                 "frozen_config": {"settings": {}},
                 "batches": [{"batch_id": "b", "input": str(input_file),
                              "raw_file": str(root / "raw.csv"), "depth": 5,
-                             "jobs": [{"job_id": "JOB_A"}]}],
+                             "jobs": [{"job_id": "JOB_A", "url": "x"}]}],
             }))
             with self.assertRaises(RuntimeError):
                 execute_manifest(root, manifest_path, binary=binary)
@@ -122,7 +122,7 @@ class RunnerTests(unittest.TestCase):
                 batches.append({
                     "batch_id": f"b{index}", "input": str(inp),
                     "raw_file": str(root / f"raw{index}.csv"), "depth": 5,
-                    "jobs": [{"job_id": f"JOB_{index}"}],
+                    "jobs": [{"job_id": f"JOB_{index}", "url": "x"}],
                 })
             manifest_path = root / "run.json"
             manifest_path.write_text(json.dumps({
