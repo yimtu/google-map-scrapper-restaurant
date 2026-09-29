@@ -521,8 +521,10 @@ def command_compare(args) -> int:
         raise ValueError("Los snapshots tienen alcances distintos y no son comparables")
     if previous_report.get("incomplete") or current_report.get("incomplete"):
         raise ValueError("No se comparan snapshots incompletos como si fueran censos completos")
-    if previous_report.get("methodology_hash") != current_report.get("methodology_hash"):
-        raise ValueError("Los snapshots tienen distinta metodología; no se presentan como tendencia directa")
+    previous_method = previous_report.get("methodology_hash")
+    current_method = current_report.get("methodology_hash")
+    if not previous_method or not current_method or previous_method != current_method:
+        raise ValueError("Los snapshots carecen de una firma metodológica comparable o usan metodologías distintas")
     compare_snapshots(months[-1], current)
     print(f"Comparación creada: {current / 'changes.csv'}")
     return 0
