@@ -55,14 +55,21 @@ def create_platform_check_queue(
     branches: Iterable[Mapping],
     *,
     platforms: Iterable[str] = PLATFORMS,
+    min_locations: int = 3,
     include_watchlist: bool = False,
 ) -> list[dict]:
-    """Create a model-independent queue, defaulting to TARGET brands."""
-    allowed = {TARGET, WATCHLIST} if include_watchlist else {TARGET}
+    """Create independent branch×platform checks for every confirmed multi-location business.
+
+    By default every brand with >=3 observed locations is eligible, regardless of
+    merchant category and with no upper branch-count limit. include_watchlist is
+    retained only for backwards compatibility and lowers the threshold to two.
+    """
+    threshold = 2 if include_watchlist else max(1, int(min_locations))
     selected = {
         str(brand.get("brand_id")): brand
         for brand in brands
-        if branch_count(brand) and classify_branch_count(branch_count(brand)) in allowed
+        if branch_count(brand) >= threshold
+        and str(brand.get("brand_resolution_status", "CONFIRMED")) == "CONFIRMED"
     }
     canonical_platforms = tuple(dict.fromkeys(normalize_platform(item) for item in platforms))
     queue = []
@@ -83,6 +90,76 @@ def create_platform_check_queue(
                 "platform": platform,
             })
     return queue
+
+
+def _as_items(value: object) -> list[dict]:
+    if value in (None, "", []):
+        return []
+    if isinstance(value, str):
+        import json
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return []
+    if isinstance(value, Mapping):
+        value = [value]
+    if not isinstance(value, Iterable) or isinstance(value, (bytes, str)):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _platform_from_link(link: str, source: str = "") -> str | None:
+    value = f"{link} {source}".casefold()
+    if "ubereats" in value or "uber.com" in value and "eat" in value:
+        return "UBER_EATS"
+    if "rappi" in value:
+        return "RAPPI"
+    if "didi" in value:
+        return "DIDI_FOOD"
+    return None
+
+
+def gosom_platform_evidence(branches: Iterable[Mapping], *, checked_at: str) -> list[dict]:
+    """Extract deterministic positive platform evidence already returned by Gosom.
+
+    Only explicit provider links in order_online are accepted. Missing links never
+    become NOT_FOUND; they simply remain for web verification.
+    """
+    evidence = []
+    seen = set()
+    for branch in branches:
+        for item in _as_items(branch.get("order_online")):
+            link = str(item.get("link") or "").strip()
+            source = str(item.get("source") or "").strip()
+            platform = _platform_from_link(link, source)
+            if not platform or not link:
+                continue
+            key = (str(branch.get("brand_id", "")), str(branch.get("branch_id", "")), platform, link)
+            if key in seen:
+                continue
+            seen.add(key)
+            evidence.append({
+                "brand_id": key[0],
+                "brand_name": branch.get("brand_name", ""),
+                "branch_id": key[1],
+                "branch_name": branch.get("branch_name", branch.get("title", "")),
+                "platform": platform,
+                "status": CONFIRMED,
+                "evidence_url": link,
+                "evidence_type": "gosom_order_online",
+                "matched_name": branch.get("branch_name", branch.get("title", "")),
+                "matched_address": branch.get("address", ""),
+                "matched_phone": branch.get("phone", ""),
+                "page_title": source or branch.get("branch_name", branch.get("title", "")),
+                "search_queries": "",
+                "checked_at": checked_at,
+                "method": "gosom_order_online",
+                "confidence": "high",
+                "notes": "Positive provider link captured directly by Gosom/Google Maps.",
+                "verifier_type": "gosom",
+                "protocol_version": "2",
+            })
+    return evidence
 
 
 def _validate_evidence(source: Mapping) -> dict:
