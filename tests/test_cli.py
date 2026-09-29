@@ -15,6 +15,18 @@ class CliTests(unittest.TestCase):
                         "expand-brands", "verify-platforms"):
             self.assertIn(command, result.stdout)
 
+    def test_plan_help_exposes_human_categories_not_internal_scraper_knobs(self):
+        root = Path(__file__).parents[1]
+        result = subprocess.run(
+            [sys.executable, str(root / "foodscan.py"), "plan", "--help"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--categories", result.stdout)
+        self.assertNotIn("--depth", result.stdout)
+        self.assertNotIn("--zoom", result.stdout)
+        self.assertNotIn("--workers", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
