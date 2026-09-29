@@ -150,9 +150,10 @@ def resolve_record_ids(path, rows, run_id):
                     existing.append(found[0])
             existing = list(dict.fromkeys(existing))
             if len(existing) > 1:
-                # Conflicting persistent identities are evidence of ambiguity; never auto-merge.
-                row["identity_conflict"] = True
-                record_id = sorted(existing)[0]
+                raise ValueError(
+                    "Conflicting persistent source aliases map this observation to multiple entities; "
+                    "manual identity review required"
+                )
             elif existing:
                 record_id = existing[0]
             else:
