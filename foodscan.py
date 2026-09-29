@@ -312,7 +312,15 @@ def command_pilot(args) -> int:
     calibration = summarize_pilot(result)
     settings = source.get("frozen_config", {}).get("settings", {})
     safe_concurrency = int(settings.get("concurrency", 1))
-    if calibration["failure_rate"] == 0 and calibration["jobs_completed"] >= max(1, pilot["jobs"] // 2):
+    minimum_completed = min(int(pilot.get("jobs", 0)), 12)
+    calibration["acceptable"] = (
+        calibration["jobs_completed"] >= minimum_completed
+        and calibration["failure_rate"] <= 0.05
+        and result.get("stop_reason") != "google_block"
+    )
+    if (calibration["acceptable"] and calibration["failure_rate"] == 0
+            and calibration["jobs_completed"] == calibration["jobs_total"]
+            and calibration["jobs_completed"] >= minimum_completed):
         recommended_concurrency = min(
             int(settings.get("balanced_concurrency", 2)),
             max(1, safe_concurrency + 1),
@@ -351,8 +359,11 @@ def command_approve(args) -> int:
     manifest = read_json(path)
     if not args.ack_source_policy:
         raise RuntimeError("Debes confirmar la política de fuente/licenciamiento con --ack-source-policy")
-    if not (manifest.get("calibration") or {}).get("eta", {}).get("available"):
+    calibration = manifest.get("calibration") or {}
+    if not calibration.get("eta", {}).get("available"):
         raise RuntimeError("No se aprueba una corrida grande sin piloto y ETA disponibles")
+    if not calibration.get("acceptable"):
+        raise RuntimeError("El piloto no alcanzó el gate mínimo de salud/cobertura; no se aprueba la corrida")
     manifest["source_policy_acknowledged"] = True
     manifest["source_policy_acknowledged_at"] = datetime.now(timezone.utc).isoformat()
     approve_manifest(manifest)
