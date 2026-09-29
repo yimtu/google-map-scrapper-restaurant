@@ -94,8 +94,10 @@ def _contains(text: str, term: str) -> bool:
     text_forms, term_forms = _forms(text), _forms(term)
     if not text_forms or not term_forms:
         return False
-    return any(term_form in text_form
-               for text_form in text_forms for term_form in term_forms)
+    return any(
+        term_form == text_form or f" {term_form} " in f" {text_form} "
+        for text_form in text_forms for term_form in term_forms
+    )
 
 
 def classify_requested_relationship(row: Mapping, categories: Mapping) -> dict:
