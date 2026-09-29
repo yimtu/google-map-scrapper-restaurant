@@ -108,6 +108,26 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 execute_manifest(root, manifest_path, binary=binary)
 
+    def test_runner_rejects_mutated_batch_input(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            binary = root / "gosom"
+            binary.write_bytes(b"binary")
+            import hashlib
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            input_file = root / "input.txt"
+            input_file.write_text("tampered #!# JOB_A\n")
+            manifest_path = root / "run.json"
+            manifest_path.write_text(json.dumps({
+                "run_id": "tampered", "status": "planned", "gosom_sha256": digest,
+                "frozen_config": {"settings": {}},
+                "batches": [{"batch_id": "b", "input": str(input_file),
+                             "raw_file": str(root / "raw.csv"), "depth": 5,
+                             "jobs": [{"job_id": "JOB_A", "url": "approved"}]}],
+            }))
+            with self.assertRaises(RuntimeError):
+                execute_manifest(root, manifest_path, binary=binary)
+
     def test_google_block_stops_before_later_batches(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
