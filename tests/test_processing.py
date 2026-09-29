@@ -59,10 +59,21 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(2, len(group_brands(deduplicate(generic))[1]))
         mixed = [self.place(place_id='e', website='https://cafeazul.mx', address='Cinco 5'),
                  self.place(place_id='f', address='Seis 6')]
-        self.assertEqual(1, len(group_brands(deduplicate(mixed))[1]))
+        self.assertEqual(2, len(group_brands(deduplicate(mixed))[1]))
         common = [self.place(place_id='g', title='La Casa', address='Siete 7'),
                   self.place(place_id='h', title='La Casa', address='Ocho 8')]
         self.assertEqual(2, len(group_brands(deduplicate(common))[1]))
+
+    def test_459_adversarial_same_name_pairs_never_auto_merge(self):
+        # Code-level 99/1 regression gate for the forbidden same-name-only merge.
+        for index in range(459):
+            rows = [
+                self.place(place_id=f'a{index}', title=f'Nombre {index}', address=f'Uno {index}'),
+                self.place(place_id=f'b{index}', title=f'Nombre {index}', address=f'Dos {index}'),
+            ]
+            _, brands, ambiguous = group_brands(deduplicate(rows))
+            self.assertEqual(2, len(brands))
+            self.assertEqual(1, len(ambiguous))
 
     def test_comparison_missing_is_not_closed_and_reappears(self):
         old = [self.place(place_id='a'), self.place(place_id='b')]
