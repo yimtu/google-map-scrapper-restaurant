@@ -1,8 +1,8 @@
 """Operational bridge between Codex browser research and FoodScan reports.
 
 This module deliberately performs no web requests.  It prepares the complete
-TARGET queue, imports the evidence gathered by the agent, and enforces the
-same deterministic quality gate used by the main pipeline.
+multi-location business queue, imports evidence gathered by the agent, and
+enforces the same deterministic business×platform quality gate as the pipeline.
 """
 from __future__ import annotations
 
@@ -135,8 +135,9 @@ def verify_platforms(root: Path, snapshot: Path, *,
                               if not str(item).startswith("Platform verification incomplete:")]
 
     changes = _read_csv(snapshot / "changes.csv")
-    settings_path = root / "config" / "settings.json"
-    settings = _read_json(settings_path) if settings_path.is_file() else {}
+    manifest_path = snapshot / "run_manifest.json"
+    manifest = _read_json(manifest_path) if manifest_path.is_file() else {}
+    settings = dict((manifest.get("frozen_config") or {}).get("settings") or {})
     generated = generate_standard_reports(
         snapshot, enriched_places, enriched_brands, enriched_brands,
         platform["platform_evidence"], changes, report,
