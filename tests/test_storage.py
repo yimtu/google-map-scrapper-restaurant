@@ -63,6 +63,18 @@ class StorageMigrationTests(unittest.TestCase):
             self.assertEqual(resolved1[0]["record_id"], resolved2[0]["record_id"])
             self.assertIn("place_id:new-place-id", resolved2[0]["source_aliases"])
 
+    def test_conflicting_aliases_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "foodscan.sqlite"
+            first = [{"place_id": "p1", "normalized_name": "uno", "address": "A"}]
+            second = [{"cid": "c2", "normalized_name": "dos", "address": "B"}]
+            resolve_record_ids(path, first, "r1")
+            resolve_record_ids(path, second, "r2")
+            conflict = [{"place_id": "p1", "cid": "c2",
+                         "normalized_name": "tres", "address": "C"}]
+            with self.assertRaises(ValueError):
+                resolve_record_ids(path, conflict, "r3")
+
     def test_reprocessing_same_run_archives_previous_observation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "foodscan.sqlite"
