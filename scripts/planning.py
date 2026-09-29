@@ -62,6 +62,20 @@ def approve_manifest(manifest: dict) -> dict:
         "approved_plan_sha256": manifest.get("plan_sha256"),
     })
     manifest["approval"] = approval
+    calibration = manifest.get("calibration") or {}
+    recommended = int(calibration.get("recommended_concurrency", 1) or 1)
+    frozen = manifest.get("frozen_config") or {}
+    settings = frozen.get("settings") or {}
+    if recommended > 1:
+        manifest["approved_runtime"] = {
+            "concurrency": min(recommended, int(settings.get("balanced_concurrency", 2))),
+            "browser_pool": min(recommended, int(settings.get("balanced_browser_pool", 2))),
+            "pages_per_browser": 1,
+        }
+    else:
+        manifest["approved_runtime"] = {
+            "concurrency": 1, "browser_pool": 1, "pages_per_browser": 1,
+        }
     return manifest
 
 
