@@ -4,11 +4,13 @@ FoodScan descubre establecimientos de alimentos, normaliza y deduplica resultado
 
 ## Entregables
 
-- `prospects_3_20.csv`: marcas TARGET con 3–20 sucursales observadas.
-- `watchlist_2.csv`: marcas con dos sucursales observadas.
-- `prospect_branches.csv`: detalle de sucursales TARGET.
-- `platform_presence.csv` y `platform_evidence.csv`: resultados y evidencia de Uber Eats, Rappi y DiDi Food.
-- `FoodScan_Report.pdf`: reporte final, generado sólo cuando pasa el quality gate.
+- `FoodScan_Report.pdf`: **único entregable humano canónico**, de longitud dinámica y sin truncar listas.
+- `requested_places.csv`: establecimientos de las categorías solicitadas.
+- `additional_findings.csv`: recomendaciones válidas que Google devolvió fuera de las categorías solicitadas.
+- `unclassified_findings.csv`: resultados cuya categoría no permite decidir con seguridad.
+- `multi_location_3_plus.csv`: todo negocio confirmado con 3+ locales, sin importar giro ni tamaño máximo.
+- `multi_location_branches.csv`: locales observados de esos negocios.
+- `platform_presence.csv` y `platform_evidence.csv`: decisiones independientes y evidencia de Uber Eats, Rappi y DiDi Food.
 
 Los resultados locales se crean en `snapshots/`, `data/`, `logs/`, `generated/` y `output/`. Esas carpetas no forman parte del producto publicado.
 
@@ -42,7 +44,7 @@ Después define y aprueba el territorio siguiendo [la guía territorial](territo
 
 > **Actualiza FoodScan.**
 
-El agente preparará un plan inmutable, ejecutará un piloto de calibración limitado a 15 minutos, mostrará alcance/categorías/ETA y pedirá aprobación explícita antes de iniciar la adquisición completa. Después procesará establecimientos, resolverá marcas con criterio conservador, ejecutará la expansión dirigida dentro del presupuesto aprobado, resolverá la cola web de TARGET y aplicará el quality gate antes del reporte final.
+El agente preparará un plan inmutable con categorías humanas explícitas, ejecutará un piloto de calibración limitado a 15 minutos, mostrará categorías/queries/alcance/ETA y pedirá aprobación. Gosom captura raw productivo en JSON Lines para preservar categorías secundarias. FoodScan conserva tanto los resultados solicitados como las recomendaciones adicionales de Google, resuelve marcas con criterio conservador y verifica Uber Eats, Rappi y DiDi Food **por separado para todo negocio confirmado con 3+ locales**, sin importar giro ni límite máximo de locales. El resultado humano es un solo PDF completo.
 
 ## Comandos
 
@@ -51,7 +53,7 @@ python foodscan.py --help
 python foodscan.py setup
 python foodscan.py doctor
 python foodscan.py territory --help
-python foodscan.py plan --scope AMG_FULL
+python foodscan.py plan --scope AMG_FULL --categories "tacos,postres,nieves"
 python foodscan.py pilot --plan generated/plans/<plan>/run_manifest.json
 python foodscan.py approve --plan generated/plans/<plan>/run_manifest.json --ack-source-policy
 python foodscan.py monthly --plan generated/plans/<plan>/run_manifest.json
@@ -80,3 +82,11 @@ FoodScan no promete cobertura absoluta de Google Maps. Una ausencia observada no
 ## Política de fuente
 
 Las corridas productivas requieren confirmación explícita de la política de fuente/licenciamiento. Consulta [docs/SOURCE_POLICY.md](docs/SOURCE_POLICY.md). La aprobación de FoodScan no sustituye una revisión legal ni los términos del proveedor de datos.
+
+## Categorías y recomendaciones de Google
+
+Una búsqueda de Gosom es una query de Google Maps, no un filtro duro. FoodScan nunca elimina silenciosamente recomendaciones válidas fuera del universo pedido: las clasifica como `REQUESTED`, `ADDITIONAL` o `UNCLASSIFIED` y las presenta por separado.
+
+## Plataformas
+
+No existe un estado combinado de “delivery”. Para cada negocio confirmado con tres o más locales se resuelven independientemente **Uber Eats**, **Rappi** y **DiDi Food**. Un link explícito capturado por Gosom puede confirmar un Sí; la falta de link jamás se interpreta como No.
