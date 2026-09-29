@@ -122,6 +122,7 @@ def build_plan(scope: str, destination: Path, *, month: str | None = None) -> di
         line.strip() and not line.lstrip().startswith("#")
         for line in proxy_file.read_text(encoding="utf-8").splitlines()
     )
+    proxy_file_sha256 = hashlib.sha256(proxy_file.read_bytes()).hexdigest() if proxy_enabled else None
     territory_sha = hashlib.sha256(territory_path.read_bytes()).hexdigest()
     frozen = {
         "coverage": coverage,
@@ -141,6 +142,7 @@ def build_plan(scope: str, destination: Path, *, month: str | None = None) -> di
         "gosom_version": version,
         "gosom_sha256": binary_sha,
         "proxy_enabled": proxy_enabled,
+        "proxy_file_sha256": proxy_file_sha256,
         "grid_points": len(points),
         "jobs": len(jobs),
         "batches": batches,
@@ -560,6 +562,7 @@ def command_expand_brands(args) -> int:
         manifest["brand_expansion_completed"] = True
         manifest["brand_expansion_jobs"] = 0
         write_json(manifest_path, manifest)
+        finish_snapshot(snapshot)
         print("No hay marcas confirmadas 2–20 que requieran expansión dirigida.")
         return 0
 
