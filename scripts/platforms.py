@@ -134,13 +134,22 @@ def gosom_platform_evidence(branches: Iterable[Mapping], *, checked_at: str) -> 
     evidence = []
     seen = set()
     for branch in branches:
+        brand_id = str(branch.get("brand_id") or "").strip()
+        branch_id = str(branch.get("branch_id") or "").strip()
+        branch_name = str(branch.get("branch_name") or branch.get("title") or "").strip()
+        address = str(branch.get("address") or "").strip()
+        # Auto-confirm only when the row contains enough identity information to
+        # satisfy the same evidence standard as web verification. Otherwise leave
+        # the platform pending for the agent instead of crashing or weakening proof.
+        if not (brand_id and branch_id and branch_name and address):
+            continue
         for item in _as_items(branch.get("order_online")):
             link = str(item.get("link") or "").strip()
             source = str(item.get("source") or "").strip()
             platform = _platform_from_link(link, source)
             if not platform or not link:
                 continue
-            key = (str(branch.get("brand_id", "")), str(branch.get("branch_id", "")), platform, link)
+            key = (brand_id, branch_id, platform, link)
             if key in seen:
                 continue
             seen.add(key)
@@ -148,15 +157,15 @@ def gosom_platform_evidence(branches: Iterable[Mapping], *, checked_at: str) -> 
                 "brand_id": key[0],
                 "brand_name": branch.get("brand_name", ""),
                 "branch_id": key[1],
-                "branch_name": branch.get("branch_name", branch.get("title", "")),
+                "branch_name": branch_name,
                 "platform": platform,
                 "status": CONFIRMED,
                 "evidence_url": link,
                 "evidence_type": "gosom_order_online",
-                "matched_name": branch.get("branch_name", branch.get("title", "")),
-                "matched_address": branch.get("address", ""),
+                "matched_name": branch_name,
+                "matched_address": address,
                 "matched_phone": branch.get("phone", ""),
-                "page_title": source or branch.get("branch_name", branch.get("title", "")),
+                "page_title": source or branch_name,
                 "search_queries": "",
                 "checked_at": checked_at,
                 "method": "gosom_order_online",
