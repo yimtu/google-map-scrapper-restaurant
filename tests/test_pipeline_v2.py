@@ -79,7 +79,14 @@ class PipelineV2Tests(unittest.TestCase):
             }]}
             manifest = {
                 "run_id": "fixture", "month": "2026-09", "scope": "AMG_FULL",
-                "status": "completed", "gosom_version": "fixture", "batches": [{
+                "status": "completed", "gosom_version": "fixture",
+                "frozen_config": {
+                    "categories": {"merchant_families": {"Cafeteria": ["cafeteria"]},
+                                   "default_family": "Otros"},
+                    "settings": {"charts_enabled": False, "mymaps_enabled": False},
+                    "territory_sha256": "fixture",
+                },
+                "batches": [{
                     "batch_id": "b1", "status": "completed", "raw_file": str(raw),
                     "jobs": [{"job_id": f"j{i}", "query": "cafeteria", "zone": "AMG_14039"}
                              for i in range(3)],
