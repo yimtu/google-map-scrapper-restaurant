@@ -10,9 +10,9 @@ class CliTests(unittest.TestCase):
         result = subprocess.run([sys.executable, str(root / "foodscan.py"), "--help"],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        for command in ("setup", "doctor", "territory", "plan", "pilot", "monthly",
+        for command in ("setup", "doctor", "territory", "plan", "pilot", "approve", "monthly",
                         "resume", "status", "export", "compare", "proxy", "update-gosom",
-                        "verify-platforms"):
+                        "expand-brands", "verify-platforms"):
             self.assertIn(command, result.stdout)
 
 
