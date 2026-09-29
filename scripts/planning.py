@@ -21,11 +21,26 @@ def sha256_json(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def code_identity(root: Path) -> str:
+    """Hash executable FoodScan Python sources without depending on Git metadata."""
+    root = Path(root)
+    paths = [root / "foodscan.py"] + sorted((root / "scripts").glob("*.py"))
+    digest = hashlib.sha256()
+    for path in paths:
+        if not path.is_file():
+            continue
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def plan_payload(*, scope: str, territory_sha256: str, coverage: Mapping,
                  categories: Mapping, settings: Mapping, grid_points: list[Mapping],
                  jobs: list[Mapping], gosom_version: str | None,
                  gosom_sha256: str | None, proxy_file_sha256: str | None,
-                 code_commit: str | None) -> dict:
+                 code_sha256: str | None) -> dict:
     """Return the immutable execution payload whose hash identifies a plan."""
     return {
         "scope": scope,
@@ -38,7 +53,7 @@ def plan_payload(*, scope: str, territory_sha256: str, coverage: Mapping,
         "gosom_version": gosom_version,
         "gosom_sha256": gosom_sha256,
         "proxy_file_sha256": proxy_file_sha256,
-        "code_commit": code_commit,
+        "code_sha256": code_sha256,
     }
 
 
@@ -78,6 +93,12 @@ def approve_manifest(manifest: dict) -> dict:
         manifest["approved_runtime"] = {
             "concurrency": 1, "browser_pool": 1, "pages_per_browser": 1,
         }
+    approval["approved_execution_sha256"] = sha256_json({
+        "plan_sha256": manifest.get("plan_sha256"),
+        "approved_runtime": manifest.get("approved_runtime"),
+        "source_policy_acknowledged": bool(manifest.get("source_policy_acknowledged")),
+    })
+    manifest["methodology_hash"] = methodology_hash(manifest)
     return manifest
 
 
@@ -91,6 +112,13 @@ def verify_approval(manifest: Mapping) -> None:
         raise RuntimeError("La corrida aprobada carece de confirmación de política de fuente/licenciamiento")
     if approval.get("approved_plan_sha256") != manifest.get("plan_sha256"):
         raise RuntimeError("La aprobación no corresponde al plan actual; genera y aprueba un plan nuevo")
+    expected_execution = sha256_json({
+        "plan_sha256": manifest.get("plan_sha256"),
+        "approved_runtime": manifest.get("approved_runtime"),
+        "source_policy_acknowledged": bool(manifest.get("source_policy_acknowledged")),
+    })
+    if approval.get("approved_execution_sha256") != expected_execution:
+        raise RuntimeError("El runtime o la autorización cambiaron después de aprobar; vuelve a aprobar el plan")
 
 
 def stratified_pilot_jobs(jobs: Iterable[Mapping], *, max_jobs: int = 18,
@@ -180,13 +208,23 @@ def methodology_payload(manifest: Mapping) -> dict:
         "categories": frozen.get("categories"),
         "coverage": frozen.get("coverage"),
         "settings_methodology": {
-            key: (frozen.get("settings") or {}).get(key)
-            for key in ("lang", "batch_size", "concurrency", "browser_pool", "pages_per_browser",
-                        "brand_expansion_max_jobs")
+            "lang": (frozen.get("settings") or {}).get("lang"),
+            "batch_size": (frozen.get("settings") or {}).get("batch_size"),
+            "concurrency": (manifest.get("approved_runtime") or {}).get(
+                "concurrency", (frozen.get("settings") or {}).get("concurrency")
+            ),
+            "browser_pool": (manifest.get("approved_runtime") or {}).get(
+                "browser_pool", (frozen.get("settings") or {}).get("browser_pool")
+            ),
+            "pages_per_browser": (manifest.get("approved_runtime") or {}).get(
+                "pages_per_browser", (frozen.get("settings") or {}).get("pages_per_browser")
+            ),
+            "brand_expansion_max_jobs": (frozen.get("settings") or {}).get("brand_expansion_max_jobs"),
         },
         "gosom_version": manifest.get("gosom_version"),
         "gosom_sha256": manifest.get("gosom_sha256"),
         "proxy_file_sha256": manifest.get("proxy_file_sha256"),
+        "code_sha256": manifest.get("code_sha256"),
         "normalization_version": "2",
         "dedupe_version": "2",
         "brand_resolution_version": "2",
