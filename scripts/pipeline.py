@@ -221,7 +221,7 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
     metadata = {
         'snapshot_id': report['month'], 'generated_at': report['date'],
         'gosom_version': report.get('gosom_version'), 'gosom_sha256': manifest.get('gosom_sha256'),
-        'foodscan_version': '0.3.0',
+        'foodscan_version': '0.4.0',
         'territory_sha256': frozen.get('territory_sha256'),
         'territory_source': 'territory/processed/territory.geojson',
         'source_policy_version': settings.get('source_policy_version', 'unknown'),
