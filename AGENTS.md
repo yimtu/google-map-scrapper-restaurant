@@ -71,6 +71,14 @@ FoodScan puede conservar detalle por sucursal, pero el quality gate cuenta una d
 
 ## Investigación web de checks pendientes
 
+Si existen checks pendientes, el agente **DEBE resolverlos activamente utilizando las capacidades web disponibles en su entorno**; el agente realiza la investigación con el navegador o herramienta web disponible.
+
+**Un snippet o la memoria del modelo no son evidencia. Que el nombre aparezca en un buscador no basta. Abre el resultado** y comprueba identidad antes de confirmar.
+
+Si el entorno no permite completar un check, **conserva `PENDING`** o registra ERROR; nunca inventes una conclusión.
+
+Después de guardar evidencia ejecuta `foodscan verify-platforms` y repite mientras queden decisiones requeridas sin cerrar.
+
 Si platform_check_queue.csv contiene filas pendientes, el agente DEBE investigarlas con las capacidades web disponibles.
 
 - prioriza URL directa de la plataforma;
