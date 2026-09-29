@@ -1,78 +1,122 @@
-"""Evidence-based grouping; scope stays uncertain until researched."""
+"""Precision-first brand resolution; same name alone never proves a chain."""
 import hashlib
 from collections import Counter
 from urllib.parse import urlparse
+
 from .normalize import normalize_name
 
-AGGREGATORS = {'facebook.com', 'instagram.com', 'google.com', 'maps.google.com', 'ubereats.com',
-               'rappi.com', 'rappi.com.mx', 'whatsapp.com', 'wa.me', 'linktr.ee', 'tripadvisor.com'}
-GENERIC_NAMES = {'cafe', 'cafeteria', 'panaderia', 'pasteleria', 'sushi', 'restaurant',
-                 'restaurante', 'comida', 'comida para llevar', 'supermercado', 'tienda', 'abarrotes',
-                 'la casa', 'el sazon', 'los compadres', 'cocina economica', 'el rincon',
-                 'la esquina', 'el patio'}
+AGGREGATORS = {
+    "facebook.com", "instagram.com", "google.com", "maps.google.com", "ubereats.com",
+    "rappi.com", "rappi.com.mx", "whatsapp.com", "wa.me", "linktr.ee", "tripadvisor.com",
+}
+GENERIC_NAMES = {
+    "cafe", "cafeteria", "panaderia", "pasteleria", "sushi", "restaurant",
+    "restaurante", "comida", "comida para llevar", "supermercado", "tienda", "abarrotes",
+    "la casa", "el sazon", "los compadres", "cocina economica", "el rincon",
+    "la esquina", "el patio",
+}
 
 
 def domain(value):
     if not isinstance(value, str):
-        return ''
-    host = (urlparse(value if '://' in value else 'https://' + value).hostname or '').lower().removeprefix('www.')
-    return '' if any(host == d or host.endswith('.' + d) for d in AGGREGATORS) else host
+        return ""
+    host = (urlparse(value if "://" in value else "https://" + value).hostname or "").lower().removeprefix("www.")
+    return "" if any(host == d or host.endswith("." + d) for d in AGGREGATORS) else host
+
+
+def _brand_row(brand_id, members, evidence, confidence, resolution_status):
+    municipalities = sorted({
+        r.get("municipality") for r in members
+        if r.get("municipality") not in (None, "", "UNKNOWN")
+    })
+    families = Counter(r.get("merchant_family") for r in members if r.get("merchant_family"))
+    ratings = [float(r["review_rating"]) for r in members
+               if str(r.get("review_rating", "")).replace(".", "", 1).isdigit()]
+    reviews = [int(float(r["review_count"])) for r in members
+               if str(r.get("review_count", "")).replace(".", "", 1).isdigit()]
+    websites = sorted({r.get("website") for r in members if r.get("website")})
+    phones = sorted({r.get("phone") for r in members if r.get("phone")})
+    return {
+        "brand_id": brand_id,
+        "brand_name": members[0].get("title", ""),
+        "branches_amg": len(members),
+        "branch_count_amg": len(members),
+        "branches_core": sum(bool(r.get("inside_core_periferico", r.get("in_core"))) for r in members),
+        "branch_count_core": sum(bool(r.get("inside_core_periferico", r.get("in_core"))) for r in members),
+        "branch_count_urban_amg": sum(bool(r.get("inside_urban_amg")) for r in members),
+        "municipalities": "; ".join(municipalities),
+        "merchant_family": families.most_common(1)[0][0] if families else "",
+        "rating_avg": round(sum(ratings) / len(ratings), 2) if ratings else "",
+        "reviews_total": sum(reviews),
+        "website": websites[0] if websites else "",
+        "phones": "; ".join(phones),
+        "brand_scope": "uncertain",
+        "confidence": confidence,
+        "brand_resolution_status": resolution_status,
+        "evidence": evidence,
+    }
 
 
 def group_brands(rows):
-    groups, ambiguous = {}, []
+    """Group only when there is strong chain evidence.
+
+    Exact normalized name by itself is intentionally insufficient. Homonyms are
+    preserved as separate brands and emitted to the ambiguity queue so a later
+    directed web/brand-enrichment pass can resolve them.
+    """
+    rows = list(rows)
     by_name = {}
     for row in rows:
-        name = row.get('normalized_name') or normalize_name(row.get('title'))
+        name = row.get("normalized_name") or normalize_name(row.get("title"))
         by_name.setdefault(name, []).append(row)
+
+    groups = []
+    ambiguous = []
     for name, members in by_name.items():
-        hosts = {domain(row.get('website', '')) for row in members} - {''}
-        categories = {normalize_name(row.get('google_category') or row.get('category'))
-                      for row in members} - {''}
-        # Exact name plus one non-conflicting private domain, or exact name plus
-        # one shared observed category, is a reasonable chain candidate. A
-        # generic/common name or conflicting domains stays split and ambiguous.
-        coherent = (name and name not in GENERIC_NAMES and len(hosts) <= 1
-                    and bool(hosts or len(categories) == 1 or len(members) >= 2))
-        if coherent:
-            groups[('entity_name', next(iter(hosts), ''), name)] = members
-        else:
-            for row in members:
-                host = domain(row.get('website', ''))
-                key = ('domain_name', host, name) if host and name else ('individual', row['record_id'])
-                groups.setdefault(key, []).append(row)
+        hosts = {domain(row.get("website", "")) for row in members} - {""}
+
+        if name and name not in GENERIC_NAMES and len(members) > 1 and len(hosts) == 1:
+            host = next(iter(hosts))
+            # Every member must either explicitly carry the shared private domain
+            # or have no website. A conflicting private domain forbids the merge.
+            conflicting = {
+                domain(row.get("website", "")) for row in members
+                if domain(row.get("website", "")) and domain(row.get("website", "")) != host
+            }
+            if not conflicting:
+                groups.append(("confirmed", ("domain_name", host, name), members))
+                continue
+
+        # No strong evidence: keep establishments separate. If the same non-generic
+        # name appears more than once, preserve a review candidate with member IDs.
+        if name and name not in GENERIC_NAMES and len(members) > 1:
+            ambiguous.append({
+                "name": name,
+                "candidate_count": len(members),
+                "member_record_ids": ";".join(str(row.get("record_id", "")) for row in members),
+                "reason": "exact_name_without_independent_chain_evidence",
+                "resolution_status": "AMBIGUOUS",
+            })
+        for row in members:
+            groups.append(("single", ("individual", row["record_id"]), [row]))
+
     places, brands = [], []
-    names = {}
-    for key, members in groups.items():
+    for status, key, members in groups:
         brand_id = hashlib.sha256(repr(key).encode()).hexdigest()[:20]
-        municipalities = sorted({r.get('municipality') for r in members
-                                 if r.get('municipality') not in (None, '', 'UNKNOWN')})
-        families = Counter(r.get('merchant_family') for r in members if r.get('merchant_family'))
-        ratings = [float(r['review_rating']) for r in members if str(r.get('review_rating', '')).replace('.', '', 1).isdigit()]
-        reviews = [int(float(r['review_count'])) for r in members if str(r.get('review_count', '')).replace('.', '', 1).isdigit()]
-        websites = sorted({r.get('website') for r in members if r.get('website')})
-        phones = sorted({r.get('phone') for r in members if r.get('phone')})
-        brand = {'brand_id': brand_id, 'brand_name': members[0].get('title', ''),
-                 'branches_amg': len(members), 'branch_count_amg': len(members),
-                 'branches_core': sum(bool(r.get('inside_core_periferico', r.get('in_core'))) for r in members),
-                 'branch_count_core': sum(bool(r.get('inside_core_periferico', r.get('in_core'))) for r in members),
-                 'branch_count_urban_amg': sum(bool(r.get('inside_urban_amg')) for r in members),
-                 'municipalities': '; '.join(municipalities),
-                 'merchant_family': families.most_common(1)[0][0] if families else '',
-                 'rating_avg': round(sum(ratings) / len(ratings), 2) if ratings else '',
-                 'reviews_total': sum(reviews), 'website': websites[0] if websites else '',
-                 'phones': '; '.join(phones),
-                 'brand_scope': 'uncertain', 'confidence': 0.9 if len(members) > 1 else 0.5,
-                 'evidence': ('same_name_private_domain' if len(members) > 1 and key[1]
-                              else 'exact_normalized_name_distinct_places' if len(members) > 1
-                              else 'single_establishment')}
+        if status == "confirmed":
+            evidence = "same_name_private_domain"
+            confidence = 0.99
+            resolution_status = "CONFIRMED"
+        else:
+            evidence = "single_establishment"
+            confidence = 0.5
+            resolution_status = "SINGLE"
+        brand = _brand_row(brand_id, members, evidence, confidence, resolution_status)
         brands.append(brand)
         for row in members:
-            places.append({**row, **brand, 'branch_id': row['record_id'],
-                           'branch_name': row.get('title', '')})
-        name = members[0].get('normalized_name')
-        if name and name in names:
-            ambiguous.append({'name': name, 'brand_id_a': names[name], 'brand_id_b': brand_id,
-                              'reason': 'Same name without sufficient independent evidence'})
-        names[name] = brand_id
-    return places, brands, ambiguous[:500]
+            places.append({
+                **row, **brand,
+                "branch_id": row["record_id"],
+                "branch_name": row.get("title", ""),
+            })
+    return places, brands, ambiguous[:1000]
