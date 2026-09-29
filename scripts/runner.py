@@ -55,8 +55,12 @@ def _settings(manifest: dict[str, Any]) -> dict[str, Any]:
             settings[key] = approved_runtime[key]
     # Calibration runs are intentionally conservative regardless of later approved runtime.
     if manifest.get("kind") == "pilot":
-        settings["concurrency"] = 1
-        settings["browser_pool"] = 1
+        settings["concurrency"] = min(
+            2, int(settings.get("pilot_concurrency", settings.get("balanced_concurrency", 2)))
+        )
+        settings["browser_pool"] = min(
+            2, int(settings.get("pilot_browser_pool", settings.get("balanced_browser_pool", 2)))
+        )
         settings["pages_per_browser"] = 1
     return settings
 
