@@ -206,6 +206,10 @@ def smoke_test(root):
               'returncode': result.returncode, 'raw_records': len(rows), 'valid_title_category': len(valid),
               'sqlite_records': count, 'pipeline_places': len(places), 'raw_path': str(raw), 'folder': str(folder), 'date': now(), 'production_data': False}
     report['binary'] = str(active)
+    report['gosom_sha256'] = sha256(active)
+    settings_path = root / 'config' / 'settings.json'
+    if settings_path.is_file():
+        report['settings_sha256'] = hashlib.sha256(settings_path.read_bytes()).hexdigest()
     report['diagnosis'] = diagnose_scraper_error(log_text) if not report['ok'] else 'ok'
     (folder / 'report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     (root / '.runtime' / 'smoke-latest.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
