@@ -166,6 +166,8 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
               'methodology_hash': manifest.get('methodology_hash'),
               'plan_id': manifest.get('plan_id'), 'plan_sha256': manifest.get('plan_sha256'),
               'territory_sha256': frozen.get('territory_sha256'),
+              'source_policy_acknowledged': bool(manifest.get('source_policy_acknowledged')),
+              'source_policy_acknowledged_at': manifest.get('source_policy_acknowledged_at'),
               'query_yield': manifest.get('query_yield', []), 'coverage_by_zone': coverage_rows,
               'marginal_gain_by_pass': manifest.get('marginal_gain_by_pass', []),
               'warnings': warnings, 'incomplete': incomplete, 'status': manifest.get('status', 'unknown')}
@@ -191,6 +193,8 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
         'territory_sha256': frozen.get('territory_sha256'),
         'territory_source': 'territory/processed/territory.geojson',
         'source_policy_version': settings.get('source_policy_version', 'unknown'),
+        'source_policy_acknowledged': bool(manifest.get('source_policy_acknowledged')),
+        'source_policy_acknowledged_at': manifest.get('source_policy_acknowledged_at'),
         'plan_id': manifest.get('plan_id'), 'plan_sha256': manifest.get('plan_sha256'),
         'methodology_hash': manifest.get('methodology_hash'),
         'source_run_ids': [manifest['run_id']], 'geography_layers': geography.layer_status,
