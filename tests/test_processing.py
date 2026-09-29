@@ -107,7 +107,10 @@ class ProcessingTests(unittest.TestCase):
             raw.write_text('\n'.join(json.dumps(r) for r in records))
             territory = {'features':[{'properties':{'scope':'CORE_GDL','zone':'core'},'geometry':{
                 'type':'Polygon','coordinates':[[[-104,20],[-103,20],[-103,21],[-104,21],[-104,20]]]}}]}
-            manifest = {'run_id':'pilot','scope':'AMG_FULL','status':'completed','batches':[
+            manifest = {'run_id':'pilot','scope':'AMG_FULL','status':'completed',
+                'frozen_config': {'categories': {'merchant_families': {'Cafe': ['cafe']}},
+                                  'settings': {}, 'territory_sha256': 'fixture'},
+                'batches': [
                 {'batch_id':'one','status':'completed','raw_file':str(raw),'jobs':[{'job_id':'j','query':'cafe','zone':'core'}]}]}
             report = process_snapshot(root,snapshot,territory,manifest)
             self.assertEqual(report['unique_places'],1)
