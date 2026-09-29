@@ -177,13 +177,15 @@ def methodology_payload(manifest: Mapping) -> dict:
         "coverage": frozen.get("coverage"),
         "settings_methodology": {
             key: (frozen.get("settings") or {}).get(key)
-            for key in ("lang", "batch_size", "concurrency", "browser_pool", "pages_per_browser")
+            for key in ("lang", "batch_size", "concurrency", "browser_pool", "pages_per_browser",
+                        "brand_expansion_max_jobs")
         },
         "gosom_version": manifest.get("gosom_version"),
         "gosom_sha256": manifest.get("gosom_sha256"),
         "normalization_version": "2",
         "dedupe_version": "2",
         "brand_resolution_version": "2",
+        "brand_expansion_policy_version": "1",
     }
 
 
