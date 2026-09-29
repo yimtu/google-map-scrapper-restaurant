@@ -54,7 +54,9 @@ def make_jobs(points, categories, pilot=False):
                 raise ValueError('Invalid job depth or zoom')
             job_id='J_'+hashlib.sha256(f"{point['point_id']}|{point['pass']}|{term}".encode()).hexdigest()[:24]
             url=f"https://www.google.com/maps/search/{quote(term,safe='')}/@{float(point['latitude']):.7f},{float(point['longitude']):.7f},{zoom}z"
-            jobs.append({'job_id':job_id,'url':url,'point_id':point['point_id'],'zone':point['zone'],'scope':point['scope'],'query':term,'depth':depth,'zoom':zoom,'pass':point['pass']})
+            jobs.append({'job_id':job_id,'url':url,'point_id':point['point_id'],'zone':point['zone'],
+                         'scope':point['scope'],'query':term,'depth':depth,'zoom':zoom,'pass':point['pass'],
+                         'latitude':float(point['latitude']),'longitude':float(point['longitude'])})
     if len({j['job_id'] for j in jobs})!=len(jobs):
         raise ValueError('Duplicate point/query job IDs')
     return jobs
