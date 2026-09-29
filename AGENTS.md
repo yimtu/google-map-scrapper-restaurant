@@ -21,7 +21,7 @@ Antes de una corrida mensual presenta alcance, puntos, consultas activas/categor
 
 No declares éxito porque terminó un subproceso. Revisa contenido, batches y `run_report.json`. Un volumen anormalmente bajo, CAPTCHA o fallos requiere diagnóstico. No automatices CAPTCHA ni presentes una corrida parcial como completa.
 
-Conserva los valores iniciales seguros definidos por FoodScan: navegador normal, concurrencia/pool/páginas conservadores y sin fast mode. El piloto comienza en 1/1/1 y sólo puede recomendar el perfil balanceado 2/2/1 cuando no observa fallos; nunca escales automáticamente más allá del presupuesto aprobado. Gosom es una dependencia externa; `update-gosom` invalida el smoke anterior y exige uno nuevo. No uses Docker en la ruta normal.
+Conserva los valores iniciales seguros definidos por FoodScan: navegador normal, concurrencia/pool/páginas conservadores y sin fast mode. El smoke se ejecuta en 1/1/1; el piloto acotado prueba realmente el perfil balanceado 2/2/1 y sólo puede recomendarlo cuando completa la muestra sin fallos; nunca escales automáticamente más allá del presupuesto aprobado. Gosom es una dependencia externa; `update-gosom` invalida el smoke anterior y exige uno nuevo. No uses Docker en la ruta normal.
 
 ## Datos, secretos y trazabilidad
 
