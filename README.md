@@ -42,7 +42,7 @@ Después define y aprueba el territorio siguiendo [la guía territorial](territo
 
 > **Actualiza FoodScan.**
 
-El agente ejecutará la adquisición o reanudación, procesará establecimientos y marcas, resolverá la cola web de los prospectos TARGET y aplicará el quality gate antes del reporte final.
+El agente preparará un plan inmutable, ejecutará un piloto de calibración limitado a 15 minutos, mostrará alcance/categorías/ETA y pedirá aprobación explícita antes de iniciar la adquisición completa. Después procesará establecimientos, resolverá marcas con criterio conservador, ejecutará la expansión dirigida dentro del presupuesto aprobado, resolverá la cola web de TARGET y aplicará el quality gate antes del reporte final.
 
 ## Comandos
 
@@ -52,8 +52,10 @@ python foodscan.py setup
 python foodscan.py doctor
 python foodscan.py territory --help
 python foodscan.py plan --scope AMG_FULL
-python foodscan.py pilot --scope AMG_FULL
-python foodscan.py monthly --scope AMG_FULL
+python foodscan.py pilot --plan generated/plans/<plan>/run_manifest.json
+python foodscan.py approve --plan generated/plans/<plan>/run_manifest.json --ack-source-policy
+python foodscan.py monthly --plan generated/plans/<plan>/run_manifest.json
+python foodscan.py expand-brands --month YYYY-MM
 python foodscan.py status
 python foodscan.py resume
 python foodscan.py verify-platforms --month YYYY-MM
@@ -74,3 +76,7 @@ En Windows también puedes usar `foodscan.cmd`; en Linux o macOS, `sh foodscan.s
 - [Solución de problemas](docs/TROUBLESHOOTING.md)
 
 FoodScan no promete cobertura absoluta de Google Maps. Una ausencia observada no demuestra un cierre y `NOT_FOUND` en una plataforma significa únicamente “No confirmada en la revisión realizada”.
+
+## Política de fuente
+
+Las corridas productivas requieren confirmación explícita de la política de fuente/licenciamiento. Consulta [docs/SOURCE_POLICY.md](docs/SOURCE_POLICY.md). La aprobación de FoodScan no sustituye una revisión legal ni los términos del proveedor de datos.
