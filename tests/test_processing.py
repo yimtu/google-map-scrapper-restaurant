@@ -46,21 +46,51 @@ class ProcessingTests(unittest.TestCase):
                 self.place(place_id='b', title='Dos', website='https://facebook.com/dos')]
         self.assertEqual(len(group_brands(deduplicate(rows))[1]), 2)
 
-    def test_exact_non_generic_name_can_form_watchlist_without_domain(self):
+    def test_exact_non_generic_name_never_forms_chain_without_independent_evidence(self):
         rows = [self.place(place_id='a', address='Uno 1'),
                 self.place(place_id='b', address='Dos 2')]
-        _, brands, _ = group_brands(deduplicate(rows))
-        self.assertEqual(1, len(brands))
-        self.assertEqual(2, brands[0]['branches_amg'])
+        _, brands, ambiguous = group_brands(deduplicate(rows))
+        self.assertEqual(2, len(brands))
+        self.assertTrue(all(b['branches_amg'] == 1 for b in brands))
+        self.assertEqual(1, len(ambiguous))
+        self.assertEqual('AMBIGUOUS', ambiguous[0]['resolution_status'])
         generic = [self.place(place_id='c', title='Cafetería', address='Tres 3'),
                    self.place(place_id='d', title='Cafetería', address='Cuatro 4')]
         self.assertEqual(2, len(group_brands(deduplicate(generic))[1]))
         mixed = [self.place(place_id='e', website='https://cafeazul.mx', address='Cinco 5'),
                  self.place(place_id='f', address='Seis 6')]
-        self.assertEqual(1, len(group_brands(deduplicate(mixed))[1]))
+        self.assertEqual(2, len(group_brands(deduplicate(mixed))[1]))
         common = [self.place(place_id='g', title='La Casa', address='Siete 7'),
                   self.place(place_id='h', title='La Casa', address='Ocho 8')]
         self.assertEqual(2, len(group_brands(deduplicate(common))[1]))
+
+    def test_confirmed_chain_never_absorbs_same_name_row_without_own_evidence(self):
+        rows = [
+            self.place(place_id='a', title='Marca Precisa', address='Uno',
+                       website='https://marca.example/a'),
+            self.place(place_id='b', title='Marca Precisa', address='Dos',
+                       website='https://marca.example/b'),
+            self.place(place_id='c', title='Marca Precisa', address='Tres'),
+        ]
+        _, brands, ambiguous = group_brands(deduplicate(rows))
+        counts = sorted(b['branches_amg'] for b in brands)
+        self.assertEqual([1, 2], counts)
+        confirmed = [b for b in brands if b['brand_resolution_status'] == 'CONFIRMED']
+        self.assertEqual(1, len(confirmed))
+        self.assertEqual(2, confirmed[0]['branches_amg'])
+        self.assertEqual(1, len(ambiguous))
+        self.assertEqual(1, ambiguous[0]['candidate_count'])
+
+    def test_459_adversarial_same_name_pairs_never_auto_merge(self):
+        # Code-level 99/1 regression gate for the forbidden same-name-only merge.
+        for index in range(459):
+            rows = [
+                self.place(place_id=f'a{index}', title=f'Nombre {index}', address=f'Uno {index}'),
+                self.place(place_id=f'b{index}', title=f'Nombre {index}', address=f'Dos {index}'),
+            ]
+            _, brands, ambiguous = group_brands(deduplicate(rows))
+            self.assertEqual(2, len(brands))
+            self.assertEqual(1, len(ambiguous))
 
     def test_comparison_missing_is_not_closed_and_reappears(self):
         old = [self.place(place_id='a'), self.place(place_id='b')]
@@ -105,7 +135,10 @@ class ProcessingTests(unittest.TestCase):
             raw.write_text('\n'.join(json.dumps(r) for r in records))
             territory = {'features':[{'properties':{'scope':'CORE_GDL','zone':'core'},'geometry':{
                 'type':'Polygon','coordinates':[[[-104,20],[-103,20],[-103,21],[-104,21],[-104,20]]]}}]}
-            manifest = {'run_id':'pilot','scope':'AMG_FULL','status':'completed','batches':[
+            manifest = {'run_id':'pilot','scope':'AMG_FULL','status':'completed',
+                'frozen_config': {'categories': {'merchant_families': {'Cafe': ['cafe']}},
+                                  'settings': {}, 'territory_sha256': 'fixture'},
+                'batches': [
                 {'batch_id':'one','status':'completed','raw_file':str(raw),'jobs':[{'job_id':'j','query':'cafe','zone':'core'}]}]}
             report = process_snapshot(root,snapshot,territory,manifest)
             self.assertEqual(report['unique_places'],1)

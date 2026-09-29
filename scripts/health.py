@@ -1,10 +1,12 @@
 """Operational health checks; errors and summaries never reveal proxy secrets."""
+import hashlib
 import json
 import re
 import shutil
 import sqlite3
 import sys
 import tempfile
+from datetime import datetime, timezone
 from contextlib import closing
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -54,18 +56,37 @@ def doctor(root, network=True):
         add('Gosom engine', active.is_file(), 'Patched FoodScan build' if patched else 'Official build')
     except (OSError, ValueError, KeyError) as error:
         add('Gosom engine', False, str(error))
+    settings_path = root / 'config' / 'settings.json'
+    try:
+        settings = json.loads(settings_path.read_text(encoding='utf-8-sig'))
+    except (OSError, ValueError):
+        settings = {}
+
     browser = root / '.runtime' / 'browser-install.json'
     binaries = list((root / '.runtime' / 'browsers').glob('chromium*'))
     add('Browser', browser.exists() and bool(binaries), 'Chromium in .runtime' if browser.exists() else 'Run foodscan setup.')
     smoke = root / '.runtime' / 'smoke-latest.json'
     try:
         smoke_info = json.loads(smoke.read_text(encoding='utf-8'))
-        smoke_ok = bool(smoke_info.get('ok'))
-        smoke_detail = (f"OK: {smoke_info.get('raw_records', 0)} records" if smoke_ok else
-                        f"Failed: {smoke_info.get('diagnosis', 'unknown_error')}; see tests/smoke.")
+        current_binary = active_binary_path(root)
+        binary_matches = smoke_info.get('gosom_sha256') == sha256(current_binary)
+        settings_matches = (
+            not settings_path.is_file()
+            or smoke_info.get('settings_sha256') == hashlib.sha256(settings_path.read_bytes()).hexdigest()
+        )
+        stamp = datetime.fromisoformat(str(smoke_info.get('date', '')).replace('Z', '+00:00'))
+        age_hours = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds() / 3600
+        max_age = float(settings.get('smoke_max_age_hours', 24))
+        fresh = 0 <= age_hours <= max_age
+        smoke_ok = bool(smoke_info.get('ok')) and binary_matches and settings_matches and fresh
+        smoke_detail = (
+            f"OK: {smoke_info.get('raw_records', 0)} records; age={age_hours:.1f}h"
+            if smoke_ok else
+            f"Stale/mismatched smoke: binary={binary_matches}, settings={settings_matches}, age={age_hours:.1f}h"
+        )
         add('Scraper smoke', smoke_ok, smoke_detail)
-    except (OSError, ValueError):
-        add('Scraper smoke', False, 'Run foodscan setup to perform the live browser check.')
+    except (OSError, ValueError, KeyError):
+        add('Scraper smoke', False, 'Run foodscan setup to perform a fresh live browser check.')
     territory = root / 'territory' / 'processed' / 'territory.geojson'
     try:
         data = load_territory(territory, require_approved=True)
@@ -73,10 +94,15 @@ def doctor(root, network=True):
         add('Territory', bool(scopes), 'Approved scopes: ' + ', '.join(scopes))
     except (OSError, ValueError):
         add('Territory', False, 'ONE-TIME HUMAN INPUT REQUIRED: import approved GeoJSON/KML/KMZ.')
-    try:
-        settings = json.loads((root / 'config' / 'settings.json').read_text(encoding='utf-8-sig'))
-        add('Config', settings.get('concurrency') == 1 and settings.get('batch_size', 0) > 0, 'Conservative settings loaded.')
-    except (OSError, ValueError):
+    if settings:
+        concurrency = int(settings.get('concurrency', 1))
+        balanced = int(settings.get('balanced_concurrency', 2))
+        browser_pool = int(settings.get('browser_pool', 1))
+        pages = int(settings.get('pages_per_browser', 1))
+        config_ok = (1 <= concurrency <= balanced <= 2 and 1 <= browser_pool <= 2
+                     and pages == 1 and int(settings.get('batch_size', 0)) > 0)
+        add('Config', config_ok, f'Conservative runtime: c={concurrency}, balanced<={balanced}, pool={browser_pool}, pages={pages}.')
+    else:
         add('Config', False, 'Run setup; settings.json missing/invalid.')
     try:
         secret = root / 'config' / 'secrets' / 'proxies.txt'

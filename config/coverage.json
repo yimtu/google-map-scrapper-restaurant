@@ -6,7 +6,7 @@
     "rural": {"cell_km": 2.0, "zoom": 15, "depth": 5, "query_profile": "FOOD_CORE"}
   },
   "adaptive_grid": {
-    "enabled": true,
+    "enabled": false,
     "min_observations": 2,
     "high_yield": 80,
     "medium_yield": 30,
@@ -16,7 +16,5 @@
   },
   "historical_yields": {},
   "refine_result_threshold": 80,
-  "marginal_gain_stop_pct": 0.5,
-  "max_grid_points": 100000,
-  "max_passes": 3
+  "max_grid_points": 100000
 }

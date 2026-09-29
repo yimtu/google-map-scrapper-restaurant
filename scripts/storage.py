@@ -49,6 +49,11 @@ def init_db(path):
         CREATE TABLE IF NOT EXISTS observations (run_id TEXT, record_id TEXT, data_json TEXT, PRIMARY KEY(run_id,record_id));
         CREATE TABLE IF NOT EXISTS brands (brand_id TEXT PRIMARY KEY, data_json TEXT);
         CREATE TABLE IF NOT EXISTS brand_members (run_id TEXT, brand_id TEXT, record_id TEXT, PRIMARY KEY(run_id,record_id));
+        CREATE TABLE IF NOT EXISTS source_aliases (
+            alias TEXT PRIMARY KEY, record_id TEXT NOT NULL,
+            first_seen_run TEXT, last_seen_run TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_source_aliases_record ON source_aliases(record_id);
         CREATE TABLE IF NOT EXISTS run_history (
             history_id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, month TEXT, scope TEXT,
             report_json TEXT, archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -99,3 +104,69 @@ def save_run(path, report, places, brands):
                 VALUES (?,?,?,?,?,?,?,?,?)''', (report['run_id'], row['record_id'], dump(row), *geography))
             db.execute('INSERT INTO brand_members VALUES (?,?,?)', (report['run_id'], row['brand_id'], row['record_id']))
         db.executemany('INSERT OR REPLACE INTO brands VALUES (?,?)', [(b['brand_id'], dump(b)) for b in brands])
+
+
+def _row_aliases(row):
+    """Return stable source aliases from strongest to weakest."""
+    import hashlib
+    aliases = []
+    for field in ("place_id", "cid", "data_id", "link"):
+        value = str(row.get(field) or "").strip()
+        if value:
+            aliases.append(f"{field}:{value}")
+    name = str(row.get("normalized_name") or "").strip()
+    address = str(row.get("address") or "").strip().casefold()
+    lat, lon = row.get("latitude"), row.get("longitude")
+    if name and address:
+        payload = f"{name}|{address}"
+        aliases.append("name_address:" + hashlib.sha256(payload.encode()).hexdigest()[:24])
+    if name and lat is not None and lon is not None:
+        try:
+            payload = f"{name}|{float(lat):.5f}|{float(lon):.5f}"
+            aliases.append("name_coord:" + hashlib.sha256(payload.encode()).hexdigest()[:24])
+        except (TypeError, ValueError):
+            pass
+    return list(dict.fromkeys(aliases))
+
+
+def resolve_record_ids(path, rows, run_id):
+    """Assign persistent internal record IDs using an alias table.
+
+    Source IDs remain aliases. A newly observed stronger identifier never changes
+    an already known internal record_id when any existing alias still matches.
+    """
+    import hashlib
+    path = Path(path)
+    init_db(path)
+    output = []
+    with closing(sqlite3.connect(path)) as db, db:
+        for source in rows:
+            row = dict(source)
+            aliases = _row_aliases(row)
+            existing = []
+            for alias in aliases:
+                found = db.execute("SELECT record_id FROM source_aliases WHERE alias=?", (alias,)).fetchone()
+                if found:
+                    existing.append(found[0])
+            existing = list(dict.fromkeys(existing))
+            if len(existing) > 1:
+                raise ValueError(
+                    "Conflicting persistent source aliases map this observation to multiple entities; "
+                    "manual identity review required"
+                )
+            elif existing:
+                record_id = existing[0]
+            else:
+                seed = aliases[0] if aliases else str(row.get("record_id") or json.dumps(row, sort_keys=True, default=str))
+                record_id = "R_" + hashlib.sha256(seed.encode()).hexdigest()[:24]
+            row["record_id"] = record_id
+            row["source_aliases"] = aliases
+            for alias in aliases:
+                db.execute(
+                    """INSERT INTO source_aliases(alias,record_id,first_seen_run,last_seen_run)
+                       VALUES (?,?,?,?)
+                       ON CONFLICT(alias) DO UPDATE SET last_seen_run=excluded.last_seen_run""",
+                    (alias, record_id, run_id, run_id),
+                )
+            output.append(row)
+    return output

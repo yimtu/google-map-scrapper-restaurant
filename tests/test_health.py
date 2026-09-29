@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timezone
 import json
 import sqlite3
 import tempfile
@@ -7,7 +8,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.gosom import binary_path, install_browser, install_gosom
+from scripts.gosom import binary_path, patched_binary_path, install_browser, install_gosom
 from scripts.health import doctor
 
 
@@ -27,7 +28,6 @@ class HealthTests(unittest.TestCase):
         (binary.parent / "VERSION.json").write_text(json.dumps({"version": "v-test", "sha256": digest}))
         (root / ".runtime" / "browsers" / "chromium-test").mkdir(parents=True)
         (root / ".runtime" / "browser-install.json").write_text("{}")
-        (root / ".runtime" / "smoke-latest.json").write_text(json.dumps({"ok": True, "raw_records": 1}))
         (root / "territory" / "processed").mkdir(parents=True)
         (root / "territory" / "processed" / "territory.geojson").write_text(
             json.dumps({"type": "FeatureCollection", "features": [{"type": "Feature",
@@ -35,7 +35,15 @@ class HealthTests(unittest.TestCase):
                 "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]}}]})
         )
         (root / "config" / "secrets").mkdir(parents=True)
-        (root / "config" / "settings.json").write_text(json.dumps({"concurrency": 1, "batch_size": 50}))
+        settings = {"concurrency": 1, "balanced_concurrency": 2, "browser_pool": 1,
+                    "batch_size": 25, "smoke_max_age_hours": 24}
+        (root / "config" / "settings.json").write_text(json.dumps(settings))
+        settings_sha = hashlib.sha256((root / "config" / "settings.json").read_bytes()).hexdigest()
+        (root / ".runtime" / "smoke-latest.json").write_text(json.dumps({
+            "ok": True, "raw_records": 1, "gosom_sha256": digest,
+            "settings_sha256": settings_sha,
+            "date": datetime.now(timezone.utc).isoformat(),
+        }))
         (root / "config" / "secrets" / "proxies.txt").write_text("# optional\n")
         (root / "data").mkdir()
         with closing(sqlite3.connect(root / "data" / "foodscan.db")) as db:
@@ -57,13 +65,16 @@ class HealthTests(unittest.TestCase):
             official = binary_path(root)
             official.unlink()
             (official.parent / "VERSION.json").unlink()
-            patched = root / "tools" / "gosom-foodscan" / "gosom-foodscan.exe"
+            patched = patched_binary_path(root)
             patched.parent.mkdir(parents=True)
             patched.write_bytes(b"published patched binary")
             digest = hashlib.sha256(patched.read_bytes()).hexdigest()
             (patched.parent / "VERSION.json").write_text(json.dumps({
                 "version": "0.1.0", "upstream_gosom_version": "v1.18.1", "sha256": digest,
             }))
+            smoke = json.loads((root / ".runtime" / "smoke-latest.json").read_text())
+            smoke["gosom_sha256"] = digest
+            (root / ".runtime" / "smoke-latest.json").write_text(json.dumps(smoke))
             with patch("scripts.health.request", return_value=_Response()):
                 report = doctor(root)
             self.assertTrue(report["ready"], report)

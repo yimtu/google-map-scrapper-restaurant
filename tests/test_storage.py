@@ -5,7 +5,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from scripts.storage import init_db, save_run
+from scripts.storage import init_db, resolve_record_ids, save_run
 
 
 class StorageMigrationTests(unittest.TestCase):
@@ -49,6 +49,31 @@ class StorageMigrationTests(unittest.TestCase):
             self.assertEqual(current, ("Guadalajara", 1, None))
             self.assertEqual(history, [("r1", "Zapopan"), ("r2", "Guadalajara")])
             self.assertEqual(json.loads(source), ["IIEG"])
+
+    def test_persistent_identity_survives_new_stronger_source_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "foodscan.sqlite"
+            first = [{"record_id": "legacy", "normalized_name": "cafe azul", "address": "Uno 1",
+                      "latitude": 20.7, "longitude": -103.4}]
+            resolved1 = resolve_record_ids(path, first, "r1")
+            second = [{"record_id": "other", "place_id": "new-place-id",
+                       "normalized_name": "cafe azul", "address": "Uno 1",
+                       "latitude": 20.7, "longitude": -103.4}]
+            resolved2 = resolve_record_ids(path, second, "r2")
+            self.assertEqual(resolved1[0]["record_id"], resolved2[0]["record_id"])
+            self.assertIn("place_id:new-place-id", resolved2[0]["source_aliases"])
+
+    def test_conflicting_aliases_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "foodscan.sqlite"
+            first = [{"place_id": "p1", "normalized_name": "uno", "address": "A"}]
+            second = [{"cid": "c2", "normalized_name": "dos", "address": "B"}]
+            resolve_record_ids(path, first, "r1")
+            resolve_record_ids(path, second, "r2")
+            conflict = [{"place_id": "p1", "cid": "c2",
+                         "normalized_name": "tres", "address": "C"}]
+            with self.assertRaises(ValueError):
+                resolve_record_ids(path, conflict, "r3")
 
     def test_reprocessing_same_run_archives_previous_observation(self):
         with tempfile.TemporaryDirectory() as directory:

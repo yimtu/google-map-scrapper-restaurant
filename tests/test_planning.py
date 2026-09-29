@@ -1,0 +1,143 @@
+import hashlib
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from foodscan import _materialize_plan
+
+from scripts.planning import (
+    approve_manifest,
+    estimate_run,
+    methodology_hash,
+    stratified_pilot_jobs,
+    verify_approval,
+)
+
+
+class PlanningTests(unittest.TestCase):
+    def jobs(self):
+        rows = []
+        for zone in ("A", "B", "C", "D"):
+            for depth in (5, 7):
+                for query in ("restaurante", "cafe", "tacos", "sushi", "pizza", "pan", "extra"):
+                    rows.append({
+                        "job_id": f"{zone}-{depth}-{query}",
+                        "zone": zone, "depth": depth, "query": query,
+                        "point_id": f"{zone}-{depth}", "pass": 1,
+                    })
+        return rows
+
+    def test_pilot_is_bounded_and_stratified(self):
+        selected = stratified_pilot_jobs(self.jobs(), max_jobs=18, query_limit=6)
+        self.assertLessEqual(len(selected), 18)
+        self.assertGreaterEqual(len({row["zone"] for row in selected}), 4)
+        self.assertLessEqual(len({row["query"] for row in selected}), 6)
+
+    def test_eta_uses_observed_runtime_and_concurrency(self):
+        eta = estimate_run(jobs=120, seconds_per_job=40, concurrency=2, uncertainty_pct=20)
+        self.assertTrue(eta["available"])
+        self.assertEqual(eta["eta_seconds"], 2400)
+        self.assertEqual(eta["eta_low_seconds"], 1920)
+        self.assertEqual(eta["eta_high_seconds"], 2880)
+
+    def test_approval_freezes_runtime_and_hash(self):
+        manifest = {
+            "plan_sha256": "abc",
+            "source_policy_acknowledged": True,
+            "calibration": {"recommended_concurrency": 2},
+            "frozen_config": {"settings": {"balanced_concurrency": 2, "balanced_browser_pool": 2}},
+            "approval": {"required": True, "approved": False},
+        }
+        approve_manifest(manifest)
+        verify_approval(manifest)
+        self.assertEqual(manifest["approved_runtime"],
+                         {"concurrency": 2, "browser_pool": 2, "pages_per_browser": 1})
+        manifest["plan_sha256"] = "changed"
+        with self.assertRaises(RuntimeError):
+            verify_approval(manifest)
+
+    def test_runtime_tampering_after_approval_is_rejected(self):
+        manifest = {
+            "plan_sha256": "abc",
+            "source_policy_acknowledged": True,
+            "calibration": {"recommended_concurrency": 2},
+            "frozen_config": {"settings": {"balanced_concurrency": 2, "balanced_browser_pool": 2}},
+            "approval": {"required": True, "approved": False},
+        }
+        approve_manifest(manifest)
+        verify_approval(manifest)
+        manifest["approved_runtime"]["concurrency"] = 1
+        with self.assertRaises(RuntimeError):
+            verify_approval(manifest)
+
+    def test_approval_without_source_policy_never_executes(self):
+        manifest = {
+            "plan_sha256": "abc",
+            "calibration": {"recommended_concurrency": 1},
+            "frozen_config": {"settings": {}},
+            "approval": {"required": True, "approved": False},
+        }
+        approve_manifest(manifest)
+        with self.assertRaises(RuntimeError):
+            verify_approval(manifest)
+
+    def test_materialization_uses_frozen_territory_and_rebuilds_batch_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plan"
+            plan_dir.mkdir()
+            territory = b'{"type":"FeatureCollection","features":[]}'
+            (plan_dir / "territory.geojson").write_bytes(territory)
+            source_input = plan_dir / "old.txt"
+            source_input.write_text("tampered\n")
+            manifest = {
+                "scope": "AMG_FULL", "month": "2026-09", "plan_id": "plan-x",
+                "frozen_config": {"territory_sha256": hashlib.sha256(territory).hexdigest()},
+                "batches": [{
+                    "batch_id": "b1", "input": str(source_input),
+                    "jobs": [{"job_id": "J1", "url": "https://approved.example"}],
+                }],
+            }
+            plan_path = plan_dir / "run_manifest.json"
+            plan_path.write_text(json.dumps(manifest))
+            target = root / "snapshot"
+            materialized_path = _materialize_plan(plan_path, target)
+            result = json.loads(materialized_path.read_text())
+            self.assertEqual(territory, (target / "territory.geojson").read_bytes())
+            batch_input = Path(result["batches"][0]["input"]).read_text()
+            self.assertEqual("https://approved.example #!# J1\n", batch_input)
+
+    def test_materialization_rejects_mutated_frozen_territory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plan"
+            plan_dir.mkdir()
+            original = b"original"
+            (plan_dir / "territory.geojson").write_bytes(b"changed")
+            manifest = {
+                "scope": "AMG_FULL", "month": "2026-09", "plan_id": "plan-x",
+                "frozen_config": {"territory_sha256": hashlib.sha256(original).hexdigest()},
+                "batches": [],
+            }
+            plan_path = plan_dir / "run_manifest.json"
+            plan_path.write_text(json.dumps(manifest))
+            with self.assertRaises(RuntimeError):
+                _materialize_plan(plan_path, root / "snapshot")
+
+    def test_methodology_hash_changes_with_territory(self):
+        base = {
+            "scope": "AMG_FULL", "gosom_version": "v1", "gosom_sha256": "g",
+            "frozen_config": {
+                "territory_sha256": "one", "categories": {"active_queries": ["a"]},
+                "coverage": {"densities": {}},
+                "settings": {"lang": "es", "batch_size": 25, "concurrency": 1,
+                             "browser_pool": 1, "pages_per_browser": 1},
+            },
+        }
+        other = {**base, "frozen_config": {**base["frozen_config"], "territory_sha256": "two"}}
+        self.assertNotEqual(methodology_hash(base), methodology_hash(other))
+
+
+if __name__ == "__main__":
+    unittest.main()
