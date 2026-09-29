@@ -1,4 +1,10 @@
+import hashlib
+import json
+import tempfile
 import unittest
+from pathlib import Path
+
+from foodscan import _materialize_plan
 
 from scripts.planning import (
     approve_manifest,
@@ -75,6 +81,49 @@ class PlanningTests(unittest.TestCase):
         approve_manifest(manifest)
         with self.assertRaises(RuntimeError):
             verify_approval(manifest)
+
+    def test_materialization_uses_frozen_territory_and_rebuilds_batch_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plan"
+            plan_dir.mkdir()
+            territory = b'{"type":"FeatureCollection","features":[]}'
+            (plan_dir / "territory.geojson").write_bytes(territory)
+            source_input = plan_dir / "old.txt"
+            source_input.write_text("tampered\n")
+            manifest = {
+                "scope": "AMG_FULL", "month": "2026-09", "plan_id": "plan-x",
+                "frozen_config": {"territory_sha256": hashlib.sha256(territory).hexdigest()},
+                "batches": [{
+                    "batch_id": "b1", "input": str(source_input),
+                    "jobs": [{"job_id": "J1", "url": "https://approved.example"}],
+                }],
+            }
+            plan_path = plan_dir / "run_manifest.json"
+            plan_path.write_text(json.dumps(manifest))
+            target = root / "snapshot"
+            materialized_path = _materialize_plan(plan_path, target)
+            result = json.loads(materialized_path.read_text())
+            self.assertEqual(territory, (target / "territory.geojson").read_bytes())
+            batch_input = Path(result["batches"][0]["input"]).read_text()
+            self.assertEqual("https://approved.example #!# J1\n", batch_input)
+
+    def test_materialization_rejects_mutated_frozen_territory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "plan"
+            plan_dir.mkdir()
+            original = b"original"
+            (plan_dir / "territory.geojson").write_bytes(b"changed")
+            manifest = {
+                "scope": "AMG_FULL", "month": "2026-09", "plan_id": "plan-x",
+                "frozen_config": {"territory_sha256": hashlib.sha256(original).hexdigest()},
+                "batches": [],
+            }
+            plan_path = plan_dir / "run_manifest.json"
+            plan_path.write_text(json.dumps(manifest))
+            with self.assertRaises(RuntimeError):
+                _materialize_plan(plan_path, root / "snapshot")
 
     def test_methodology_hash_changes_with_territory(self):
         base = {
