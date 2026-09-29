@@ -38,6 +38,7 @@ class PlanningTests(unittest.TestCase):
     def test_approval_freezes_runtime_and_hash(self):
         manifest = {
             "plan_sha256": "abc",
+            "source_policy_acknowledged": True,
             "calibration": {"recommended_concurrency": 2},
             "frozen_config": {"settings": {"balanced_concurrency": 2, "balanced_browser_pool": 2}},
             "approval": {"required": True, "approved": False},
@@ -47,6 +48,17 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(manifest["approved_runtime"],
                          {"concurrency": 2, "browser_pool": 2, "pages_per_browser": 1})
         manifest["plan_sha256"] = "changed"
+        with self.assertRaises(RuntimeError):
+            verify_approval(manifest)
+
+    def test_approval_without_source_policy_never_executes(self):
+        manifest = {
+            "plan_sha256": "abc",
+            "calibration": {"recommended_concurrency": 1},
+            "frozen_config": {"settings": {}},
+            "approval": {"required": True, "approved": False},
+        }
+        approve_manifest(manifest)
         with self.assertRaises(RuntimeError):
             verify_approval(manifest)
 
