@@ -152,7 +152,7 @@ def build_plan(scope: str, destination: Path, *, month: str | None = None) -> di
     payload = plan_payload(
         scope=scope, territory_sha256=territory_sha, coverage=coverage, categories=categories,
         settings=settings, grid_points=points, jobs=jobs, gosom_version=version,
-        gosom_sha256=binary_sha, code_commit=None,
+        gosom_sha256=binary_sha, proxy_file_sha256=proxy_file_sha256, code_commit=None,
     )
     attach_plan_identity(manifest, payload)
     manifest["methodology_hash"] = methodology_hash(manifest)
@@ -238,6 +238,7 @@ def _pilot_from_plan(plan_path: Path, destination: Path) -> dict:
         "gosom_version": source.get("gosom_version"),
         "gosom_sha256": source.get("gosom_sha256"),
         "proxy_enabled": source.get("proxy_enabled", False),
+        "proxy_file_sha256": source.get("proxy_file_sha256"),
         "grid_points": len({job.get("point_id") for job in selected}),
         "jobs": len(selected),
         "batches": batches,
@@ -585,6 +586,7 @@ def command_expand_brands(args) -> int:
             "gosom_version": manifest.get("gosom_version"),
             "gosom_sha256": manifest.get("gosom_sha256"),
             "proxy_enabled": manifest.get("proxy_enabled", False),
+            "proxy_file_sha256": manifest.get("proxy_file_sha256"),
             "approved_runtime": manifest.get("approved_runtime", {}),
             "frozen_config": manifest.get("frozen_config", {}),
             "batches": batches,
