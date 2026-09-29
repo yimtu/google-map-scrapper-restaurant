@@ -184,9 +184,14 @@ def print_plan(manifest: dict) -> None:
     print(f"Proxy: {'CONFIGURED' if manifest.get('proxy_enabled') else 'NOT CONFIGURED'}")
     print(f"Gosom: {manifest.get('gosom_version') or 'NO INSTALADO'}")
     if eta.get("available"):
-        print(f"ETA estimada: {human_duration(eta.get('eta_low_seconds'))}–{human_duration(eta.get('eta_high_seconds'))}")
+        print(f"ETA estimada base: {human_duration(eta.get('eta_low_seconds'))}–{human_duration(eta.get('eta_high_seconds'))}")
+        max_eta = calibration.get("eta_with_expansion_budget") or {}
+        if max_eta.get("available"):
+            print(f"ETA con presupuesto máximo de expansión: {human_duration(max_eta.get('eta_low_seconds'))}–{human_duration(max_eta.get('eta_high_seconds'))}")
     else:
         print("ETA estimada: pendiente de piloto")
+    settings = manifest.get("frozen_config", {}).get("settings", {})
+    print(f"Presupuesto expansión de marcas: <= {int(settings.get('brand_expansion_max_jobs', 250))} jobs")
     approval = manifest.get("approval") or {}
     print(f"Aprobación: {'APROBADO' if approval.get('approved') else 'PENDIENTE'}")
 
@@ -309,6 +314,12 @@ def command_pilot(args) -> int:
     calibration["recommended_concurrency"] = recommended_concurrency
     calibration["eta"] = estimate_run(
         jobs=int(source.get("jobs", 0)),
+        seconds_per_job=calibration.get("seconds_per_job"),
+        concurrency=recommended_concurrency,
+        uncertainty_pct=float(settings.get("eta_uncertainty_pct", 20)),
+    )
+    calibration["eta_with_expansion_budget"] = estimate_run(
+        jobs=int(source.get("jobs", 0)) + int(settings.get("brand_expansion_max_jobs", 250)),
         seconds_per_job=calibration.get("seconds_per_job"),
         concurrency=recommended_concurrency,
         uncertainty_pct=float(settings.get("eta_uncertainty_pct", 20)),
@@ -502,6 +513,94 @@ def command_update(_args) -> int:
     return 0
 
 
+def command_expand_brands(args) -> int:
+    import csv
+    from scripts.expansion import make_expansion_jobs
+    from scripts.queries import write_batches
+    from scripts.runner import execute_manifest
+
+    snapshot = ROOT / "snapshots" / month_value(args.month)
+    manifest_path = snapshot / "run_manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"No existe snapshot para {args.month}")
+    manifest = read_json(manifest_path)
+    if manifest.get("status") != "completed":
+        raise RuntimeError("La expansión de marcas requiere adquisición base completa")
+    if manifest.get("brand_expansion_completed"):
+        print("Expansión de marcas ya completada para este snapshot.")
+        return 0
+
+    brands_path = snapshot / "brands.csv"
+    if not brands_path.is_file():
+        finish_snapshot(snapshot)
+    with brands_path.open(encoding="utf-8-sig", newline="") as stream:
+        brands = list(csv.DictReader(stream))
+
+    base_jobs = [
+        job for batch in manifest.get("batches", [])
+        for job in batch.get("jobs", [])
+        if job.get("query_type") != "brand_expansion"
+    ]
+    jobs = make_expansion_jobs(brands, base_jobs)
+    settings = manifest.get("frozen_config", {}).get("settings", {})
+    limit = int(settings.get("brand_expansion_max_jobs", 250))
+    if len(jobs) > limit:
+        raise RuntimeError(
+            f"La expansión requiere {len(jobs)} jobs y excede el presupuesto aprobado de {limit}; "
+            "genera un plan nuevo con un presupuesto explícito mayor"
+        )
+    if not jobs:
+        manifest["brand_expansion_completed"] = True
+        manifest["brand_expansion_jobs"] = 0
+        write_json(manifest_path, manifest)
+        print("No hay marcas confirmadas 2–20 que requieran expansión dirigida.")
+        return 0
+
+    folder = snapshot / "brand_expansion"
+    expansion_path = folder / "run_manifest.json"
+    if expansion_path.exists():
+        expansion = read_json(expansion_path)
+    else:
+        batches = write_batches(jobs, folder / "batches", int(settings.get("batch_size", 25)))
+        for batch in batches:
+            batch["raw_file"] = str((folder / "raw" / f"{batch['batch_id']}.csv").resolve())
+            batch["status"] = "planned"
+        expansion = {
+            "run_id": f"{manifest['run_id']}-brand-expansion",
+            "month": manifest.get("month"),
+            "scope": manifest.get("scope"),
+            "kind": "brand_expansion",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": "planned",
+            "gosom_version": manifest.get("gosom_version"),
+            "gosom_sha256": manifest.get("gosom_sha256"),
+            "proxy_enabled": manifest.get("proxy_enabled", False),
+            "approved_runtime": manifest.get("approved_runtime", {}),
+            "frozen_config": manifest.get("frozen_config", {}),
+            "batches": batches,
+            "jobs": len(jobs),
+        }
+        write_json(expansion_path, expansion)
+
+    result = execute_manifest(ROOT, expansion_path)
+    if result["status"] != "completed":
+        print("Expansión incompleta; usa foodscan resume --run <brand_expansion/run_manifest.json>.")
+        return 3
+
+    existing = {batch.get("batch_id") for batch in manifest.get("batches", [])}
+    for batch in result.get("batches", []):
+        copied = dict(batch)
+        copied["batch_id"] = f"expansion_{batch['batch_id']}"
+        if copied["batch_id"] not in existing:
+            manifest["batches"].append(copied)
+    manifest["brand_expansion_completed"] = True
+    manifest["brand_expansion_jobs"] = len(jobs)
+    write_json(manifest_path, manifest)
+    report = finish_snapshot(snapshot)
+    print(f"Expansión dirigida completa: {len(jobs)} jobs. Marcas detectadas: {report.get('brands_detected', 0)}")
+    return 0
+
+
 def command_verify_platforms(args) -> int:
     from scripts.platform_verification import resolve_snapshot, verify_platforms
     snapshot = resolve_snapshot(ROOT, month=args.month, snapshot=args.snapshot)
@@ -572,6 +671,10 @@ def parser() -> argparse.ArgumentParser:
     item = commands.add_parser("compare")
     item.set_defaults(function=command_compare)
     item.add_argument("--month")
+
+    item = commands.add_parser("expand-brands")
+    item.set_defaults(function=command_expand_brands)
+    item.add_argument("--month", required=True)
 
     item = commands.add_parser("verify-platforms")
     item.set_defaults(function=command_verify_platforms)
