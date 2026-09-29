@@ -137,6 +137,14 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
     queue = create_platform_check_queue(brands, places)
     platform_requested = bool(manifest.get('platform_verification_requested', bool(imported_evidence)))
     gate = platform_quality_gate(queue, places, requested=platform_requested)
+    expansion_required = any(
+        b.get('brand_resolution_status') == 'CONFIRMED'
+        and b.get('commercial_segment') in {WATCHLIST, TARGET}
+        for b in brands
+    )
+    expansion_pending = expansion_required and not bool(manifest.get('brand_expansion_completed'))
+    if expansion_pending:
+        gate['report_status'] = 'DRAFT'
     previous, historical_ids = history(snapshot, manifest)
     changes = compare_records(previous, places, historical_ids)
     batches = manifest.get('batches', [])
@@ -170,8 +178,14 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
               'source_policy_acknowledged_at': manifest.get('source_policy_acknowledged_at'),
               'query_yield': manifest.get('query_yield', []), 'coverage_by_zone': coverage_rows,
               'marginal_gain_by_pass': manifest.get('marginal_gain_by_pass', []),
+              'brand_expansion_required': expansion_required,
+              'brand_expansion_pending': expansion_pending,
+              'brand_expansion_completed': bool(manifest.get('brand_expansion_completed')),
+              'brand_expansion_jobs': int(manifest.get('brand_expansion_jobs', 0) or 0),
               'warnings': warnings, 'incomplete': incomplete, 'status': manifest.get('status', 'unknown')}
     report.update({'platform_verification_requested': platform_requested, **gate})
+    if expansion_pending:
+        warnings.append('Brand expansion pending: confirmed 2–20 branch chains require directed enrichment.')
     if gate['report_status'] == 'DRAFT':
         warnings.append(f"Platform verification incomplete: {gate['pending_checks']} pending, {gate['errors']} errors.")
     processed = snapshot / 'processed'
