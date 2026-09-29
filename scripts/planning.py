@@ -85,6 +85,8 @@ def verify_approval(manifest: Mapping) -> None:
         return
     if not approval.get("approved"):
         raise RuntimeError("La corrida requiere aprobación explícita del plan antes de iniciar")
+    if not manifest.get("source_policy_acknowledged"):
+        raise RuntimeError("La corrida aprobada carece de confirmación de política de fuente/licenciamiento")
     if approval.get("approved_plan_sha256") != manifest.get("plan_sha256"):
         raise RuntimeError("La aprobación no corresponde al plan actual; genera y aprueba un plan nuevo")
 
