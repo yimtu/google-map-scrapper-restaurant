@@ -108,6 +108,49 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 execute_manifest(root, manifest_path, binary=binary)
 
+    def test_pilot_really_exercises_bounded_balanced_concurrency(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            binary = root / "gosom"
+            binary.write_bytes(b"binary")
+            import hashlib
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            input_file = root / "input.txt"
+            input_file.write_text("https://example.invalid #!# JOB_A\n")
+            raw = root / "raw.csv"
+            manifest_path = root / "run.json"
+            manifest_path.write_text(json.dumps({
+                "run_id": "pilot", "kind": "pilot", "status": "planned",
+                "gosom_sha256": digest,
+                "frozen_config": {"settings": {
+                    "concurrency": 1, "browser_pool": 1, "pages_per_browser": 1,
+                    "balanced_concurrency": 2, "balanced_browser_pool": 2,
+                    "pilot_concurrency": 2, "pilot_browser_pool": 2,
+                    "batch_max_retries": 0, "batch_timeout_seconds": 60,
+                    "pilot_wall_clock_seconds": 900, "pilot_scrape_budget_seconds": 720,
+                }},
+                "batches": [{"batch_id": "b", "input": str(input_file),
+                             "raw_file": str(raw), "depth": 5,
+                             "jobs": [{"job_id": "JOB_A", "url": "https://example.invalid"}]}],
+            }))
+
+            def fake_run(args, **kwargs):
+                self.assertEqual("2", args[args.index("-c") + 1])
+                self.assertEqual("2", args[args.index("-browser-pool-size") + 1])
+                self.assertEqual("1", args[args.index("-pages-per-browser") + 1])
+                Path(str(raw) + ".resume.json").write_text(
+                    json.dumps({"completed_inputs": ["JOB_A"]})
+                )
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            with patch("scripts.runner.subprocess.run", side_effect=fake_run):
+                result = execute_manifest(root, manifest_path, binary=binary)
+            self.assertEqual("completed", result["status"])
+
     def test_runner_rejects_mutated_batch_input(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
