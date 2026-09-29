@@ -40,7 +40,8 @@ def export_mymaps(folder, rows):
 
 
 def compare_records(previous, current, historical_ids=None):
-    old, new = {identity(r): r for r in previous}, {identity(r): r for r in current}
+    key = lambda row: str(row.get('record_id') or identity(row))
+    old, new = {key(r): r for r in previous}, {key(r): r for r in current}
     historical_ids = historical_ids or set()
     fields = ('title', 'address', 'phone', 'website', 'status', 'review_rating', 'review_count', 'category')
     changes = []
