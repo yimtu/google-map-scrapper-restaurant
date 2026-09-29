@@ -1,6 +1,7 @@
 """Deterministic single-PDF reporting with complete category and platform disclosure."""
 from __future__ import annotations
 
+import html
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -150,8 +151,75 @@ def _metric(metric_id, value, source_file, logic, snapshot, generated_at):
 
 
 def _cell(value, body_style, limit=100):
-    return Paragraph(_text(value, limit).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"),
-                     body_style)
+    if hasattr(value, "wrap"):
+        return value
+    return Paragraph(html.escape(_text(value, limit)), body_style)
+
+
+def _queries(row: dict) -> list[str]:
+    values = []
+    for source in row.get("provenance") or []:
+        query = str((source or {}).get("query") or "").strip()
+        if query and query not in values:
+            values.append(query)
+    return values
+
+
+def _about_summary(row: dict) -> str:
+    groups = row.get("about") or []
+    if isinstance(groups, str):
+        try:
+            groups = json.loads(groups)
+        except (json.JSONDecodeError, TypeError):
+            return _text(groups, 260)
+    values = []
+    if isinstance(groups, list):
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            for option in group.get("options") or []:
+                if not isinstance(option, dict) or not option.get("enabled"):
+                    continue
+                name = str(option.get("name") or "").strip()
+                detail = ", ".join(str(v) for v in option.get("values") or [])
+                label = f"{name}: {detail}" if detail else name
+                if label and label not in values:
+                    values.append(label)
+    return "; ".join(values[:18])
+
+
+def _place_detail(row: dict, style):
+    complete = row.get("complete_address") if isinstance(row.get("complete_address"), dict) else {}
+    tags = ", ".join(str(item) for item in row.get("google_categories") or [])
+    matches = ", ".join(str(item) for item in row.get("matched_requested_categories") or [])
+    queries = ", ".join(_queries(row))
+    location_bits = [
+        str(complete.get("borough") or "").strip(),
+        str(row.get("municipality") or complete.get("city") or "").strip(),
+        str(complete.get("postal_code") or "").strip(),
+    ]
+    location = " · ".join(bit for bit in location_bits if bit)
+    menu = row.get("menu")
+    order_online = row.get("order_online")
+    lines = [
+        f"<b>Categoría Google:</b> {html.escape(_text(row.get('google_category', ''), 100))}",
+        f"<b>Tags:</b> {html.escape(_text(tags, 220))}",
+        f"<b>Relación:</b> {html.escape(_relationship_label(row.get('category_relationship')))}"
+        + (f" · <b>Match:</b> {html.escape(matches)}" if matches else ""),
+        f"<b>Queries que lo encontraron:</b> {html.escape(_text(queries, 240))}",
+        f"<b>Ubicación:</b> {html.escape(_text(location, 180))}",
+        f"<b>Dirección:</b> {html.escape(_text(row.get('address', ''), 220))}",
+        f"<b>Rating / reviews / precio:</b> {html.escape(str(_first(row, 'review_rating', 'rating')))}"
+        f" / {html.escape(str(row.get('review_count', '')))} / {html.escape(_text(row.get('price_range', ''), 60))}",
+        f"<b>Teléfono:</b> {html.escape(_text(row.get('phone', ''), 80))}"
+        f" · <b>Website:</b> {html.escape(_text(row.get('website', ''), 180))}",
+        f"<b>Horarios:</b> {html.escape(_text(row.get('open_hours', ''), 300))}",
+        f"<b>Atributos:</b> {html.escape(_text(_about_summary(row), 320))}",
+        f"<b>Menú:</b> {html.escape(_text(menu, 220))}",
+        f"<b>Order online:</b> {html.escape(_text(order_online, 280))}",
+        f"<b>Google Maps:</b> {html.escape(_text(row.get('link', ''), 220))}",
+    ]
+    return Paragraph("<br/>".join(lines), style)
 
 
 def _table(data, widths, body_style, font_size=6.4):
@@ -254,6 +322,45 @@ def _build_pdf(path: Path, places: list[dict], commercial: list[dict], metrics: 
     ]
     story.extend([_table(acquisition, [80*mm, 35*mm], body, 8), Spacer(1, 4 * mm)])
 
+    category_counts = {category: 0 for category in report.get("requested_categories") or []}
+    for place in requested_places:
+        for category in place.get("matched_requested_categories") or []:
+            category_counts[category] = category_counts.get(category, 0) + 1
+    story.append(Paragraph("Resultados por categoría solicitada", heading))
+    category_rows = [["Categoría", "Establecimientos"]]
+    category_rows.extend([category, count] for category, count in category_counts.items())
+    story.extend([
+        _table(category_rows, [85*mm, 35*mm], body, 7.5),
+        Paragraph("Un establecimiento puede coincidir con más de una categoría; por eso esta tabla puede sumar más que el total REQUESTED.", small),
+        Spacer(1, 3*mm),
+    ])
+
+    additional_counts = {}
+    for place in additional_places:
+        key = str(place.get("google_category") or "Sin categoría")
+        additional_counts[key] = additional_counts.get(key, 0) + 1
+    story.append(Paragraph("Qué más devolvió Google", heading))
+    extra_rows = [["Categoría Google adicional", "Establecimientos"]]
+    extra_rows.extend(sorted(additional_counts.items(), key=lambda item: (-item[1], item[0].casefold())))
+    story.extend([_table(extra_rows, [100*mm, 35*mm], body, 7), Spacer(1, 3*mm)])
+
+    coverage_fields = [
+        ("Categoría Google", "google_category"),
+        ("Teléfono", "phone"), ("Website", "website"), ("Rating", "review_rating"),
+        ("Reviews", "review_count"), ("Horarios", "open_hours"), ("Precio", "price_range"),
+        ("Atributos/about", "about"), ("Menú", "menu"), ("Order online", "order_online"),
+    ]
+    data_rows = [["Dato capturado", "Con dato", "% de únicos"]]
+    for label, field in coverage_fields:
+        count = sum(row.get(field) not in (None, "", [], {}) for row in places)
+        pct = round(100 * count / len(places), 1) if places else 0
+        data_rows.append([label, count, f"{pct}%"])
+    story.extend([
+        Paragraph("Disponibilidad real de datos en esta corrida", heading),
+        _table(data_rows, [80*mm, 25*mm, 30*mm], body, 7),
+        Spacer(1, 4*mm),
+    ])
+
     if include_platforms:
         story.append(Paragraph("Uber Eats, Rappi y DiDi Food — decisiones independientes", heading))
         story.append(Paragraph(
@@ -315,17 +422,15 @@ def _build_pdf(path: Path, places: list[dict], commercial: list[dict], metrics: 
 
     def directory_section(title_text, rows, explanation):
         story.extend([PageBreak(), Paragraph(title_text, title), Paragraph(explanation, body), Spacer(1, 3*mm)])
-        data = [["Nombre", "Categoría Google", "Categoría solicitada", "Municipio", "Dirección",
-                 "Rating", "Reviews", "Teléfono", "Website"]]
+        data = [["Establecimiento", "Datos capturados"]]
         for row in rows:
-            data.append([
-                row.get("title", ""), row.get("google_category", ""),
-                ", ".join(row.get("matched_requested_categories") or []),
-                row.get("municipality", ""), row.get("address", ""),
-                _first(row, "review_rating", "rating"), row.get("review_count", ""),
-                row.get("phone", ""), row.get("website", ""),
-            ])
-        story.append(_table(data, [34*mm, 30*mm, 31*mm, 25*mm, 48*mm, 12*mm, 14*mm, 25*mm, 38*mm], small, 5.7))
+            name = Paragraph(
+                f"<b>{html.escape(_text(row.get('title', ''), 120))}</b><br/>"
+                f"{html.escape(_text(row.get('municipality', ''), 80))}",
+                small,
+            )
+            data.append([name, _place_detail(row, small)])
+        story.append(_table(data, [52*mm, 203*mm], small, 5.8))
 
     directory_section(
         "Directorio — categorías solicitadas",
