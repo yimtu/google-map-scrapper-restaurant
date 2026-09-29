@@ -15,13 +15,15 @@ Después sigue [territorio](../territory/README_TERRITORY.md). Falta de polígon
 
 ```text
 python foodscan.py plan --scope AMG_FULL
-python foodscan.py pilot --scope AMG_FULL
+python foodscan.py pilot --plan generated/plans/<plan>/run_manifest.json
 ```
 
-Pide a la IA revisar el piloto, sus errores y `generated/query_yield.csv`, y mostrar una estimación del censo. Después:
+El piloto tiene un límite de 15 minutos. Revisa errores, `query_yield.csv`, ETA base y ETA con el presupuesto máximo de expansión. Si alcance, categorías, fuente y tiempo son aceptables, una persona debe aprobar explícitamente el plan:
 
 ```text
-python foodscan.py monthly --scope AMG_FULL
+python foodscan.py approve --plan generated/plans/<plan>/run_manifest.json --ack-source-policy
+python foodscan.py monthly --plan generated/plans/<plan>/run_manifest.json
+python foodscan.py expand-brands --month YYYY-MM
 ```
 
 Si se interrumpe, escribe **“Reanuda la corrida.”** No inicies otro mes para arreglar el anterior. Para comprobar el avance usa `python foodscan.py status`.
