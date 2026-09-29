@@ -51,6 +51,20 @@ class PlanningTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             verify_approval(manifest)
 
+    def test_runtime_tampering_after_approval_is_rejected(self):
+        manifest = {
+            "plan_sha256": "abc",
+            "source_policy_acknowledged": True,
+            "calibration": {"recommended_concurrency": 2},
+            "frozen_config": {"settings": {"balanced_concurrency": 2, "balanced_browser_pool": 2}},
+            "approval": {"required": True, "approved": False},
+        }
+        approve_manifest(manifest)
+        verify_approval(manifest)
+        manifest["approved_runtime"]["concurrency"] = 1
+        with self.assertRaises(RuntimeError):
+            verify_approval(manifest)
+
     def test_approval_without_source_policy_never_executes(self):
         manifest = {
             "plan_sha256": "abc",
