@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from urllib.parse import urlparse
 
 from .commercial import TARGET, WATCHLIST, classify_branch_count, branch_count
 
@@ -55,34 +56,135 @@ def create_platform_check_queue(
     branches: Iterable[Mapping],
     *,
     platforms: Iterable[str] = PLATFORMS,
+    min_locations: int = 3,
     include_watchlist: bool = False,
 ) -> list[dict]:
-    """Create a model-independent queue, defaulting to TARGET brands."""
-    allowed = {TARGET, WATCHLIST} if include_watchlist else {TARGET}
+    """Create independent branch×platform checks for every confirmed multi-location business.
+
+    By default every brand with >=3 observed locations is eligible, regardless of
+    merchant category and with no upper branch-count limit. include_watchlist is
+    retained only for backwards compatibility and lowers the threshold to two.
+    """
+    threshold = 2 if include_watchlist else max(1, int(min_locations))
     selected = {
         str(brand.get("brand_id")): brand
         for brand in brands
-        if branch_count(brand) and classify_branch_count(branch_count(brand)) in allowed
+        if branch_count(brand) >= threshold
+        and str(brand.get("brand_resolution_status", "CONFIRMED")) == "CONFIRMED"
     }
     canonical_platforms = tuple(dict.fromkeys(normalize_platform(item) for item in platforms))
+    branch_rows = [dict(row) for row in branches]
     queue = []
-    for branch in branches:
-        brand_id = str(branch.get("brand_id", ""))
-        brand = selected.get(brand_id)
-        if not brand:
-            continue
+    for brand_id, brand in selected.items():
+        members = [row for row in branch_rows if str(row.get("brand_id", "")) == brand_id]
         for platform in canonical_platforms:
-            queue.append({
-                "brand_id": brand_id,
-                "branch_id": branch.get("branch_id", ""),
-                "brand": brand.get("brand_name", branch.get("brand_name", "")),
-                "branch": branch.get("branch_name", branch.get("title", "")),
-                "address": branch.get("address", ""),
-                "phone": branch.get("phone", ""),
-                "website": branch.get("website", ""),
-                "platform": platform,
-            })
+            prefix = _PREFIX[platform]
+            brand_status = normalize_platform_status(brand.get(f"{prefix}_status", PENDING))
+            if brand_status in COMPLETED_STATUSES:
+                continue
+            for branch in members:
+                branch_status = normalize_platform_status(branch.get(f"{prefix}_status", PENDING))
+                if branch_status in COMPLETED_STATUSES:
+                    continue
+                queue.append({
+                    "brand_id": brand_id,
+                    "branch_id": branch.get("branch_id", ""),
+                    "brand": brand.get("brand_name", branch.get("brand_name", "")),
+                    "branch": branch.get("branch_name", branch.get("title", "")),
+                    "address": branch.get("address", ""),
+                    "phone": branch.get("phone", ""),
+                    "website": branch.get("website", ""),
+                    "platform": platform,
+                })
     return queue
+
+
+def _as_items(value: object) -> list[dict]:
+    if value in (None, "", []):
+        return []
+    if isinstance(value, str):
+        import json
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return []
+    if isinstance(value, Mapping):
+        value = [value]
+    if not isinstance(value, Iterable) or isinstance(value, (bytes, str)):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _platform_from_link(link: str, source: str = "") -> str | None:
+    """Identify provider from the destination domain, never from a label alone."""
+    parsed = urlparse(link if "://" in link else "https://" + link)
+    host = (parsed.hostname or "").casefold().removeprefix("www.")
+    path = parsed.path.casefold()
+    if host == "ubereats.com" or host.endswith(".ubereats.com"):
+        return "UBER_EATS"
+    if (host == "uber.com" or host.endswith(".uber.com")) and (
+        "eat" in path or "uber eats" in str(source or "").casefold()
+    ):
+        return "UBER_EATS"
+    if host == "rappi.com" or host.endswith(".rappi.com") or host == "rappi.com.mx" or host.endswith(".rappi.com.mx"):
+        return "RAPPI"
+    if host == "didiglobal.com" or host.endswith(".didiglobal.com"):
+        return "DIDI_FOOD"
+    if host == "didi-food.com" or host.endswith(".didi-food.com"):
+        return "DIDI_FOOD"
+    return None
+
+
+def gosom_platform_evidence(branches: Iterable[Mapping], *, checked_at: str) -> list[dict]:
+    """Extract deterministic positive platform evidence already returned by Gosom.
+
+    Only explicit provider links in order_online are accepted. Missing links never
+    become NOT_FOUND; they simply remain for web verification.
+    """
+    evidence = []
+    seen = set()
+    for branch in branches:
+        brand_id = str(branch.get("brand_id") or "").strip()
+        branch_id = str(branch.get("branch_id") or "").strip()
+        branch_name = str(branch.get("branch_name") or branch.get("title") or "").strip()
+        address = str(branch.get("address") or "").strip()
+        # Auto-confirm only when the row contains enough identity information to
+        # satisfy the same evidence standard as web verification. Otherwise leave
+        # the platform pending for the agent instead of crashing or weakening proof.
+        if not (brand_id and branch_id and branch_name and address):
+            continue
+        for item in _as_items(branch.get("order_online")):
+            link = str(item.get("link") or "").strip()
+            source = str(item.get("source") or "").strip()
+            platform = _platform_from_link(link, source)
+            if not platform or not link:
+                continue
+            key = (brand_id, branch_id, platform, link)
+            if key in seen:
+                continue
+            seen.add(key)
+            evidence.append({
+                "brand_id": key[0],
+                "brand_name": branch.get("brand_name", ""),
+                "branch_id": key[1],
+                "branch_name": branch_name,
+                "platform": platform,
+                "status": CONFIRMED,
+                "evidence_url": link,
+                "evidence_type": "gosom_order_online",
+                "matched_name": branch_name,
+                "matched_address": address,
+                "matched_phone": branch.get("phone", ""),
+                "page_title": source or branch_name,
+                "search_queries": "",
+                "checked_at": checked_at,
+                "method": "gosom_order_online",
+                "confidence": "high",
+                "notes": "Positive provider link captured directly by Gosom/Google Maps.",
+                "verifier_type": "gosom",
+                "protocol_version": "2",
+            })
+    return evidence
 
 
 def _validate_evidence(source: Mapping) -> dict:
@@ -157,12 +259,12 @@ def integrate_platform_evidence(
             prefix = _PREFIX[platform]
             statuses = [member[f"{prefix}_status"] for member in members]
             found = sum(status == CONFIRMED for status in statuses)
-            if ERROR in statuses:
+            if found:
+                status = CONFIRMED
+            elif ERROR in statuses:
                 status = ERROR
             elif PENDING in statuses or not statuses:
                 status = PENDING
-            elif found:
-                status = CONFIRMED
             elif statuses and all(item == NOT_FOUND for item in statuses):
                 status = NOT_FOUND
             else:
@@ -181,30 +283,50 @@ def integrate_platform_evidence(
     }
 
 
+def _brand_platform_status(members: list[Mapping], platform: str) -> str:
+    prefix = _PREFIX[platform]
+    statuses = [normalize_platform_status(row.get(f"{prefix}_status", PENDING)) for row in members]
+    if CONFIRMED in statuses:
+        return CONFIRMED
+    if ERROR in statuses:
+        return ERROR
+    if PENDING in statuses or not statuses:
+        return PENDING
+    if statuses and all(item == NOT_FOUND for item in statuses):
+        return NOT_FOUND
+    return UNCERTAIN
+
+
 def platform_quality_gate(queue: Iterable[Mapping], branch_presence: Iterable[Mapping], *, requested: bool) -> dict:
-    """Validate every expected TARGET branch/platform check before a final report."""
+    """Gate one independent decision per business×platform, not one delivery bundle.
+
+    A positive branch proves brand presence on that platform. A negative business
+    decision requires every observed branch to have completed without a positive.
+    """
     if not requested:
         return {"expected_checks": 0, "completed_checks": 0, "pending_checks": 0,
                 "errors": 0, "report_status": "FINAL", "platform_section_included": False,
                 "missing_checks": [], "error_checks": []}
-    branches = {(str(row.get("brand_id", "")), str(row.get("branch_id", ""))): row
-                for row in branch_presence}
+    rows = [dict(row) for row in branch_presence]
+    by_brand: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        if branch_count(row) >= 3 and str(row.get("brand_resolution_status", "CONFIRMED")) == "CONFIRMED":
+            by_brand[str(row.get("brand_id", ""))].append(row)
+
     completed = pending = errors = 0
     missing_checks, error_checks = [], []
-    for expected in queue:
-        platform = normalize_platform(expected.get("platform"))
-        key = (str(expected.get("brand_id", "")), str(expected.get("branch_id", "")))
-        row = branches.get(key, {})
-        status = normalize_platform_status(row.get(f"{_PREFIX[platform]}_status", PENDING))
-        check = {"brand_id": key[0], "branch_id": key[1], "platform": platform}
-        if status in COMPLETED_STATUSES:
-            completed += 1
-        elif status == ERROR:
-            errors += 1
-            error_checks.append(check)
-        else:
-            pending += 1
-            missing_checks.append(check)
+    for brand_id, members in by_brand.items():
+        for platform in PLATFORMS:
+            status = _brand_platform_status(members, platform)
+            check = {"brand_id": brand_id, "platform": platform}
+            if status in COMPLETED_STATUSES:
+                completed += 1
+            elif status == ERROR:
+                errors += 1
+                error_checks.append(check)
+            else:
+                pending += 1
+                missing_checks.append(check)
     expected_count = completed + pending + errors
     return {"expected_checks": expected_count, "completed_checks": completed,
             "pending_checks": pending, "errors": errors,

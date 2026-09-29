@@ -95,7 +95,9 @@ def _gosom_identity() -> tuple[str | None, str | None]:
     return version, digest
 
 
-def build_plan(scope: str, destination: Path, *, month: str | None = None) -> dict:
+def build_plan(scope: str, destination: Path, *, month: str | None = None,
+               requested_categories: list[str] | None = None) -> dict:
+    from scripts.categories import resolve_requested_categories
     from scripts.grid import generate_grid, write_grid
     from scripts.queries import make_jobs, write_batches
     from scripts.planning import attach_plan_identity, code_identity, methodology_hash, plan_payload
@@ -104,7 +106,10 @@ def build_plan(scope: str, destination: Path, *, month: str | None = None) -> di
     from scripts.territory import load_territory
     territory = load_territory(territory_path)
     coverage = read_json(ROOT / "config" / "coverage.json")
-    categories = read_json(ROOT / "config" / "categories.json")
+    categories = resolve_requested_categories(
+        read_json(ROOT / "config" / "categories.json"),
+        requested_categories,
+    )
     settings = read_json(ROOT / "config" / "settings.json")
     points = generate_grid(territory, coverage, scope=scope)
     jobs = make_jobs(points, categories, pilot=False)
@@ -113,7 +118,7 @@ def build_plan(scope: str, destination: Path, *, month: str | None = None) -> di
     write_grid(points, destination / "grid.csv", destination / "grid_preview.geojson")
     batches = write_batches(jobs, destination / "batches", int(settings.get("batch_size", 25)))
     for batch in batches:
-        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.csv").resolve())
+        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.jsonl").resolve())
         batch["status"] = "planned"
 
     version, binary_sha = _gosom_identity()
@@ -186,7 +191,9 @@ def print_plan(manifest: dict) -> None:
     print(f"Grid points: {manifest['grid_points']}")
     print(f"Jobs estimados: {manifest['jobs']}")
     print(f"Batches: {len(manifest['batches'])}")
-    print(f"Consultas activas ({len(active)}): {', '.join(active) if active else 'perfil completo'}")
+    requested = categories.get("requested_categories") or []
+    print(f"Categorías solicitadas ({len(requested)}): {', '.join(requested) if requested else 'no definidas'}")
+    print(f"Consultas derivadas ({len(active)}): {', '.join(active) if active else 'ninguna'}")
     print(f"Proxy: {'CONFIGURED' if manifest.get('proxy_enabled') else 'NOT CONFIGURED'}")
     print(f"Gosom: {manifest.get('gosom_version') or 'NO INSTALADO'}")
     if eta.get("available"):
@@ -205,7 +212,11 @@ def print_plan(manifest: dict) -> None:
 def command_plan(args) -> int:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     destination = ROOT / "generated" / "plans" / f"{stamp}-{args.scope}"
-    manifest = build_plan(args.scope, destination, month=month_value(args.month))
+    requested = [item.strip() for item in (args.categories or "").split(",") if item.strip()]
+    if not requested:
+        raise RuntimeError("Debes indicar al menos una categoría humana explícita en --categories")
+    manifest = build_plan(args.scope, destination, month=month_value(args.month),
+                          requested_categories=requested)
     print_plan(manifest)
     print(f"Plan guardado: {destination / 'run_manifest.json'}")
     print("Siguiente paso: ejecutar el piloto de calibración sobre este plan.")
@@ -226,7 +237,7 @@ def _pilot_from_plan(plan_path: Path, destination: Path) -> dict:
     )
     batches = write_batches(selected, destination / "batches", int(settings.get("batch_size", 25)))
     for batch in batches:
-        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.csv").resolve())
+        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.jsonl").resolve())
         batch["status"] = "planned"
     run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-pilot-{source['scope']}"
     pilot = {
@@ -397,7 +408,7 @@ def _materialize_plan(plan_path: Path, destination: Path) -> Path:
         )
         target_input.write_text(expected_input, encoding="utf-8")
         batch["input"] = str(target_input.resolve())
-        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.csv").resolve())
+        batch["raw_file"] = str((destination / "raw" / f"{batch['batch_id']}.jsonl").resolve())
         batch["status"] = "planned"
         materialized["batches"].append(batch)
     path = destination / "run_manifest.json"
@@ -607,7 +618,7 @@ def command_expand_brands(args) -> int:
     else:
         batches = write_batches(jobs, folder / "batches", int(settings.get("batch_size", 25)))
         for batch in batches:
-            batch["raw_file"] = str((folder / "raw" / f"{batch['batch_id']}.csv").resolve())
+            batch["raw_file"] = str((folder / "raw" / f"{batch['batch_id']}.jsonl").resolve())
             batch["status"] = "planned"
         expansion = {
             "run_id": f"{manifest['run_id']}-brand-expansion",
@@ -687,6 +698,8 @@ def parser() -> argparse.ArgumentParser:
     item.set_defaults(function=command_plan)
     item.add_argument("--scope", choices=["CORE_GDL", "AMG_FULL"], default="AMG_FULL")
     item.add_argument("--month")
+    item.add_argument("--categories", required=True,
+                      help="categorías humanas separadas por coma; FoodScan congela queries y reglas")
 
     item = commands.add_parser("pilot")
     item.set_defaults(function=command_pilot)

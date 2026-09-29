@@ -5,13 +5,17 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from .normalize import normalize_record, normalize_name, read_raw
+from .categories import classify_requested_relationship, REQUESTED, ADDITIONAL, UNCLASSIFIED
 from .dedupe import deduplicate, identity
 from .brands import group_brands
 from .exports import write_csv, export_mymaps, compare_records, compare_snapshots
 from .storage import save_run, resolve_record_ids
 from .geography import GeographyIndex
 from .commercial import LARGE, TARGET, WATCHLIST, plan_branch_network_completion, segment_brands
-from .platforms import create_platform_check_queue, integrate_platform_evidence, platform_quality_gate
+from .platforms import (
+    create_platform_check_queue, gosom_platform_evidence,
+    integrate_platform_evidence, platform_quality_gate,
+)
 from .reporting import generate_standard_reports
 from .territory import zones_for_point
 
@@ -119,7 +123,9 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
         if not in_scope or not row['title']:
             excluded.append({**row, 'exclusion_reason': 'outside_scope_or_missing_coordinates_or_title'})
             continue
-        valid.append({**row, 'zones': [row.get('municipality', 'UNKNOWN')],
+        category_contract = classify_requested_relationship(row, categories)
+        valid.append({**row, **category_contract,
+                      'zones': [row.get('municipality', 'UNKNOWN')],
                       'in_core': bool(row.get('inside_core_periferico')),
                       'merchant_family': classify(row, categories)})
     unique = deduplicate(valid)
@@ -135,9 +141,13 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
     if evidence_path.exists():
         with evidence_path.open(encoding='utf-8-sig', newline='') as stream:
             imported_evidence = list(csv.DictReader(stream))
-    platform = integrate_platform_evidence(brands, places, imported_evidence)
+    gosom_evidence = gosom_platform_evidence(places, checked_at=verified_at)
+    # Gosom links are positive evidence only; imported/web evidence fills the
+    # remaining branch×platform checks. Never infer absence from a missing link.
+    all_evidence = gosom_evidence + imported_evidence
+    platform = integrate_platform_evidence(brands, places, all_evidence)
     brands, places = platform['brand_presence'], platform['branch_presence']
-    queue = create_platform_check_queue(brands, places)
+    queue = create_platform_check_queue(brands, places, min_locations=3)
     platform_requested = bool(manifest.get('platform_verification_requested', bool(imported_evidence)))
     gate = platform_quality_gate(queue, places, requested=platform_requested)
     expansion_required = any(
@@ -167,6 +177,10 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
               'jobs': sum(len(b.get('jobs', [])) for b in batches), 'batches': len(batches),
               'failures': sum(b.get('status') not in {'completed', 'complete'} for b in batches),
               'raw_records': len(raw), 'unique_places': len(places), 'excluded_records': len(excluded),
+              'requested_places': sum(p.get('category_relationship') == REQUESTED for p in places),
+              'additional_places': sum(p.get('category_relationship') == ADDITIONAL for p in places),
+              'unclassified_places': sum(p.get('category_relationship') == UNCLASSIFIED for p in places),
+              'requested_categories': categories.get('requested_categories', []),
               'duplicate_rate': (len(valid) - len(places)) / len(valid) if valid else 0,
               'places_core': sum(bool(p.get('inside_core_periferico')) for p in places), 'places_amg': len(places),
               'brands_detected': len(brands), 'brands_2_20': len(candidates), 'ambiguous_brands': len(ambiguous),
@@ -185,6 +199,7 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
               'brand_expansion_pending': expansion_pending,
               'brand_expansion_completed': bool(manifest.get('brand_expansion_completed')),
               'brand_expansion_jobs': int(manifest.get('brand_expansion_jobs', 0) or 0),
+              'gosom_platform_evidence': len(gosom_evidence),
               'warnings': warnings, 'incomplete': incomplete, 'status': manifest.get('status', 'unknown')}
     report.update({'platform_verification_requested': platform_requested, **gate})
     if expansion_pending:
@@ -206,7 +221,7 @@ def process_snapshot(root: Path, snapshot: Path, territory: dict, manifest: dict
     metadata = {
         'snapshot_id': report['month'], 'generated_at': report['date'],
         'gosom_version': report.get('gosom_version'), 'gosom_sha256': manifest.get('gosom_sha256'),
-        'foodscan_version': '0.3.0',
+        'foodscan_version': '0.4.0',
         'territory_sha256': frozen.get('territory_sha256'),
         'territory_source': 'territory/processed/territory.geojson',
         'source_policy_version': settings.get('source_policy_version', 'unknown'),

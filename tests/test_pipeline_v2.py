@@ -81,8 +81,19 @@ class PipelineV2Tests(unittest.TestCase):
                 "run_id": "fixture", "month": "2026-09", "scope": "AMG_FULL",
                 "status": "completed", "gosom_version": "fixture",
                 "frozen_config": {
-                    "categories": {"merchant_families": {"Cafeteria": ["cafeteria"]},
-                                   "default_family": "Otros"},
+                    "categories": {
+                        "merchant_families": {"Cafeteria": ["cafeteria"]},
+                        "default_family": "Otros",
+                        "requested_categories": ["cafetería"],
+                        "requested_category_rules": {
+                            "cafetería": {
+                                "queries": ["cafetería"],
+                                "google_category_aliases": ["cafetería", "cafeteria"],
+                                "name_aliases": ["cafetería", "cafeteria"],
+                            }
+                        },
+                        "active_queries": ["cafetería"],
+                    },
                     "settings": {"charts_enabled": False, "mymaps_enabled": False},
                     "territory_sha256": "fixture",
                 },
@@ -101,12 +112,15 @@ class PipelineV2Tests(unittest.TestCase):
                 "master_places.csv", "brands_master.csv", "prospects_3_20.csv", "watchlist_2.csv",
                 "large_21_plus.csv", "prospect_branches.csv", "platform_check_queue.csv",
                 "platform_presence.csv", "platform_evidence.csv", "report_traceability.json",
+                "requested_places.csv", "additional_findings.csv", "unclassified_findings.csv",
+                "multi_location_3_plus.csv", "multi_location_branches.csv",
                 "metadata.json", "FoodScan_Report_DRAFT.pdf",
             }
             self.assertTrue(expected <= {path.name for path in snapshot.iterdir()})
             with (snapshot / "master_places.csv").open(encoding="utf-8-sig") as stream:
                 place = next(csv.DictReader(stream))
             self.assertEqual("Guadalajara", place["municipality"])
+            self.assertEqual("REQUESTED", place["category_relationship"])
             self.assertEqual("True", place["inside_amg_full"])
             self.assertEqual("", place["inside_urban_amg"])
             with (snapshot / "prospects_3_20.csv").open(encoding="utf-8-sig") as stream:

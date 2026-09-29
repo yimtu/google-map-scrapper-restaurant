@@ -229,6 +229,9 @@ def methodology_payload(manifest: Mapping) -> dict:
         "dedupe_version": "2",
         "brand_resolution_version": "2",
         "brand_expansion_policy_version": "1",
+        "category_contract_version": "2",
+        "platform_decision_version": "2",
+        "reporting_contract_version": "2",
     }
 
 

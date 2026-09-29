@@ -90,6 +90,43 @@ class RunnerTests(unittest.TestCase):
                 result = execute_manifest(root, manifest_path, binary=binary)
             self.assertEqual("completed", result["status"])
 
+    def test_jsonl_raw_output_forces_gosom_json_mode(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            binary = root / "gosom"
+            binary.write_bytes(b"binary")
+            import hashlib
+            digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+            input_file = root / "input.txt"
+            input_file.write_text("https://example.invalid #!# JOB_A\n")
+            raw = root / "raw.jsonl"
+            manifest_path = root / "run.json"
+            manifest_path.write_text(json.dumps({
+                "run_id": "jsonl", "status": "planned", "gosom_sha256": digest,
+                "frozen_config": {"settings": {
+                    "batch_max_retries": 0, "batch_timeout_seconds": 60,
+                    "concurrency": 1, "browser_pool": 1, "pages_per_browser": 1,
+                }},
+                "batches": [{"batch_id": "b", "input": str(input_file),
+                             "raw_file": str(raw), "depth": 5,
+                             "jobs": [{"job_id": "JOB_A", "url": "https://example.invalid"}]}],
+            }))
+
+            def fake_run(args, **kwargs):
+                self.assertIn("-json", args)
+                Path(str(raw) + ".resume.json").write_text(
+                    json.dumps({"completed_inputs": ["JOB_A"]})
+                )
+                class Result:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+                return Result()
+
+            with patch("scripts.runner.subprocess.run", side_effect=fake_run):
+                result = execute_manifest(root, manifest_path, binary=binary)
+            self.assertEqual("completed", result["status"])
+
     def test_runner_rejects_changed_binary(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

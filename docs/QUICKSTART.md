@@ -14,7 +14,7 @@ Python 3.11 o posterior debe estar disponible. Setup descarga el release nativo 
 Después sigue [territorio](../territory/README_TERRITORY.md). Falta de polígono es una decisión pendiente, no motivo para inventar fronteras. Con límites aprobados:
 
 ```text
-python foodscan.py plan --scope AMG_FULL
+python foodscan.py plan --scope AMG_FULL --categories "tacos,postres,nieves"
 python foodscan.py pilot --plan generated/plans/<plan>/run_manifest.json
 ```
 
@@ -31,3 +31,7 @@ Si se interrumpe, escribe **“Reanuda la corrida.”** No inicies otro mes para
 Al terminar la adquisición, el agente resolverá la cola de plataformas de los prospectos TARGET usando sus capacidades web y repetirá `verify-platforms` hasta completar el quality gate. Pide el resumen de `run_report.json` y la carpeta del mes en `snapshots/`. Una corrida con advertencias, batches o checks pendientes necesita revisión antes de usar las cifras comercialmente.
 
 El siguiente mes basta: **“Actualiza el censo de alimentos del AMG.”** Para alcance central: **“Actualiza sólo Core Guadalajara.”** No necesitas aprender los parámetros internos.
+
+## Regla para agentes
+
+No edites categorías a mano después de crear el plan. No elimines recomendaciones adicionales de Google. El entregable humano final es un solo PDF; Uber Eats, Rappi y DiDi Food se resuelven por separado para cada negocio confirmado con 3+ locales.

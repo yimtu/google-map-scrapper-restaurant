@@ -234,6 +234,8 @@ def execute_manifest(
                     "-pages-per-browser", str(max(1, int(settings.get("pages_per_browser", 1)))),
                     "-exit-on-inactivity", str(settings.get("exit_on_inactivity", "4m")),
                 ]
+                if raw.suffix.lower() in {".jsonl", ".json"}:
+                    args.append("-json")
                 proxies = root / "config" / "secrets" / "proxies.txt"
                 if proxies.exists() and any(
                     line.strip() and not line.lstrip().startswith("#")

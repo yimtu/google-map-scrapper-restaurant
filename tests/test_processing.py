@@ -92,6 +92,22 @@ class ProcessingTests(unittest.TestCase):
             self.assertEqual(2, len(brands))
             self.assertEqual(1, len(ambiguous))
 
+    def test_gosom_json_aliases_preserve_website_longitude_categories_and_description(self):
+        from scripts.normalize import normalize_record
+        row = normalize_record({
+            "title": "Ejemplo",
+            "category": "Ferretería",
+            "categories": ["Ferretería", "Tienda de herramientas"],
+            "latitude": 20.7,
+            "longtitude": -103.4,
+            "web_site": "https://ejemplo.test",
+            "description": "Negocio local",
+        })
+        self.assertEqual(-103.4, row["longitude"])
+        self.assertEqual("https://ejemplo.test", row["website"])
+        self.assertEqual(["Ferretería", "Tienda de herramientas"], row["google_categories"])
+        self.assertEqual("Negocio local", row["descriptions"])
+
     def test_comparison_missing_is_not_closed_and_reappears(self):
         old = [self.place(place_id='a'), self.place(place_id='b')]
         new = [self.place(place_id='a', review_count=3), self.place(place_id='c')]

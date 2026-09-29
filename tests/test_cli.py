@@ -15,6 +15,37 @@ class CliTests(unittest.TestCase):
                         "expand-brands", "verify-platforms"):
             self.assertIn(command, result.stdout)
 
+    def test_plan_requires_explicit_human_categories(self):
+        root = Path(__file__).parents[1]
+        result = subprocess.run(
+            [sys.executable, str(root / "foodscan.py"), "plan", "--scope", "AMG_FULL"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("--categories", result.stderr)
+
+    def test_plan_rejects_empty_category_scope(self):
+        root = Path(__file__).parents[1]
+        result = subprocess.run(
+            [sys.executable, str(root / "foodscan.py"), "plan", "--scope", "AMG_FULL",
+             "--categories", ""],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("al menos una categoría", result.stderr)
+
+    def test_plan_help_exposes_human_categories_not_internal_scraper_knobs(self):
+        root = Path(__file__).parents[1]
+        result = subprocess.run(
+            [sys.executable, str(root / "foodscan.py"), "plan", "--help"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--categories", result.stdout)
+        self.assertNotIn("--depth", result.stdout)
+        self.assertNotIn("--zoom", result.stdout)
+        self.assertNotIn("--workers", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

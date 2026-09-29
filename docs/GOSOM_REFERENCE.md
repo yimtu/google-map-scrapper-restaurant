@@ -8,13 +8,13 @@ El motor activo en Windows es temporalmente `tools/gosom-foodscan/gosom-foodscan
 
 El esquema CSV oficial enumera 36 columnas: `input_id`, `link`, `title`, `category`, `address`, `open_hours`, `popular_times`, `website`, `phone`, `plus_code`, `review_count`, `review_rating`, `reviews_per_rating`, `latitude`, `longitude`, `cid`, `status`, `descriptions`, `reviews_link`, `thumbnail`, `timezone`, `price_range`, `data_id`, `street_view_url`, `place_id`, `images`, `reservations`, `order_online`, `menu`, `owner`, `complete_address`, `credit_cards_accepted`, `about`, `user_reviews`, `user_reviews_extended`, `emails`.
 
-JSON incluye `categories` y utiliza aliases como `web_site`, `description` y el histórico `longtitude`. FoodScan conserva lo recibido y normaliza aliases; no fabrica categorías secundarias ausentes del CSV. Las imágenes contienen `title` e `image` (URL). Los enlaces de menú, reserva y pedido son campos distintos. Fuente: [Entry y CsvHeaders](https://github.com/gosom/google-maps-scraper/blob/main/gmaps/entry.go).
+JSON incluye `categories` y utiliza aliases como `web_site`, `description` y el histórico `longtitude`. **FoodScan productivo usa JSON Lines** precisamente para no perder `categories[]`; CSV queda como formato de compatibilidad/importación, no como raw preferido. FoodScan conserva lo recibido y nunca fabrica categorías secundarias. Las imágenes contienen `title` e `image` (URL). Los enlaces de menú, reserva y pedido son campos distintos. Fuente: [Entry y CsvHeaders](https://github.com/gosom/google-maps-scraper/blob/main/gmaps/entry.go).
 
 ## Controles
 
 | Opciones | Uso en FoodScan |
 |---|---|
-| `-input`, `-results`, `-json` | Entradas y salida; CSV por defecto, JSON cuando se solicita. |
+| `-input`, `-results`, `-json` | FoodScan usa JSON Lines productivo para conservar category + categories[]. |
 | `-lang`, `-geo`, `-zoom`, `-depth` | Idioma y búsqueda; FoodScan genera URLs por punto y selecciona profundidad territorial. |
 | `-grid-bbox`, `-grid-cell` | Grid uniforme nativo disponible; FoodScan calcula su grid por polígonos y densidad. |
 | `-c`, `-browser-pool-size`, `-pages-per-browser` | Carga inicial conservadora: 1, 1, 1. |
@@ -33,3 +33,7 @@ FoodScan establece `DISABLE_TELEMETRY=1` para desactivar la telemetría de Gosom
 Gosom termina su responsabilidad al entregar establecimientos crudos. Municipio, deduplicación, marcas, completar red de sucursales, segmentos comerciales, plataformas y reportes pertenecen a FoodScan; nunca deben mezclarse con el discovery inicial.
 
 Web UI, REST API, PostgreSQL, AWS Lambda, S3, SaaS Edition, LeadsDB, custom writers y Docker están fuera del camino normal de v0.1: el objetivo local se resuelve con binario, Python y SQLite. La habilidad oficial de Gosom no se instala. No se modifica el código del proveedor.
+
+## Importante sobre categorías
+
+Gosom envía queries textuales a Google Maps. No existe un filtro duro que garantice que todos los resultados pertenezcan a la query solicitada. FoodScan conserva resultados adicionales y los clasifica después; no modifiques Gosom para descartar recomendaciones durante adquisición.
