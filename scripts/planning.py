@@ -24,7 +24,8 @@ def sha256_json(value: Any) -> str:
 def plan_payload(*, scope: str, territory_sha256: str, coverage: Mapping,
                  categories: Mapping, settings: Mapping, grid_points: list[Mapping],
                  jobs: list[Mapping], gosom_version: str | None,
-                 gosom_sha256: str | None, code_commit: str | None) -> dict:
+                 gosom_sha256: str | None, proxy_file_sha256: str | None,
+                 code_commit: str | None) -> dict:
     """Return the immutable execution payload whose hash identifies a plan."""
     return {
         "scope": scope,
@@ -36,6 +37,7 @@ def plan_payload(*, scope: str, territory_sha256: str, coverage: Mapping,
         "jobs": jobs,
         "gosom_version": gosom_version,
         "gosom_sha256": gosom_sha256,
+        "proxy_file_sha256": proxy_file_sha256,
         "code_commit": code_commit,
     }
 
@@ -184,6 +186,7 @@ def methodology_payload(manifest: Mapping) -> dict:
         },
         "gosom_version": manifest.get("gosom_version"),
         "gosom_sha256": manifest.get("gosom_sha256"),
+        "proxy_file_sha256": manifest.get("proxy_file_sha256"),
         "normalization_version": "2",
         "dedupe_version": "2",
         "brand_resolution_version": "2",
