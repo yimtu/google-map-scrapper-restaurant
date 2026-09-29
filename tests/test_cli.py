@@ -15,6 +15,15 @@ class CliTests(unittest.TestCase):
                         "expand-brands", "verify-platforms"):
             self.assertIn(command, result.stdout)
 
+    def test_plan_requires_explicit_human_categories(self):
+        root = Path(__file__).parents[1]
+        result = subprocess.run(
+            [sys.executable, str(root / "foodscan.py"), "plan", "--scope", "AMG_FULL"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(2, result.returncode)
+        self.assertIn("--categories", result.stderr)
+
     def test_plan_help_exposes_human_categories_not_internal_scraper_knobs(self):
         root = Path(__file__).parents[1]
         result = subprocess.run(
