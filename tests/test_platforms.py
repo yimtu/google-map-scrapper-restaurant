@@ -125,6 +125,16 @@ class PlatformTests(unittest.TestCase):
         self.assertTrue(all(row["verifier_type"] == "gosom" for row in rows))
         self.assertFalse(any(row["status"] == NOT_FOUND for row in rows))
 
+    def test_gosom_positive_link_without_branch_identity_stays_for_web_review(self):
+        branch = {
+            "brand_id": "b", "brand_name": "Marca", "branch_id": "one",
+            "branch_name": "Marca Centro", "address": "",
+            "order_online": [{"link": "https://www.rappi.com.mx/restaurantes/123", "source": "Rappi"}],
+        }
+        self.assertEqual([], gosom_platform_evidence(
+            [branch], checked_at="2026-09-29T12:00:00Z"
+        ))
+
     def test_integration_produces_branch_and_business_presence_with_evidence(self):
         brands = [{"brand_id": "b", "brand_name": "Marca", "branch_count_amg": 2}]
         branches = [
