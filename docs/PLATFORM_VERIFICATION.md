@@ -1,48 +1,51 @@
-# Verificación de plataformas
+# Verificación independiente de Uber Eats, Rappi y DiDi Food
 
-FoodScan verifica Uber Eats, Rappi y DiDi Food para cada sucursal de marcas TARGET (3–20 sucursales observadas). La cola CSV es el contrato entre el producto y cualquier agente con acceso web.
+FoodScan verifica plataformas para **todo negocio confirmado con 3 o más locales observados**, sin importar giro y sin límite máximo de locales.
 
-## Flujo
+La pregunta no es “¿tiene delivery?”. Existen tres decisiones separadas:
 
-```text
-TARGET
-→ platform_check_queue.csv
-→ agente investiga la web
-→ platform_evidence.csv
-→ foodscan verify-platforms
-→ quality gate
-→ FINAL o DRAFT
-```
+- Uber Eats
+- Rappi
+- DiDi Food
 
-Ejecuta:
+## Evidencia automática de Gosom
 
-```text
-python foodscan.py verify-platforms --month YYYY-MM
-```
+Antes de pedir trabajo al agente, FoodScan revisa `order_online` capturado por Gosom. Un link explícito de Uber Eats, Rappi o DiDi Food es evidencia positiva y puede cerrar el Sí del negocio para esa plataforma.
 
-El comando crea o actualiza la cola, importa evidencia, valida campos, calcula el progreso y ejecuta el gate. No navega la web por Python. Si informa registros `PENDING`, el agente debe investigarlos siguiendo `AGENTS.md`, guardar evidencia y repetir el comando.
+La ausencia de link jamás produce NOT_FOUND.
 
-## Evidencia por sucursal
+## Cola web
 
-Cada fila de `platform_evidence.csv` corresponde a una combinación `brand_id × branch_id × platform` y contiene:
+Los checks que sigan sin resolver aparecen en `platform_check_queue.csv`.
 
-```text
-brand_id,branch_id,platform,status,evidence_url,page_title,
-matched_name,matched_address,checked_at,method,confidence,notes,search_queries
-```
+FoodScan conserva evidencia por sucursal porque ayuda a demostrar identidad, pero el quality gate decide a nivel negocio × plataforma:
 
-`CONFIRMED` exige una URL abierta y señales suficientes para identificar esa sucursal. Una coincidencia de nombre en el buscador no basta. Una sucursal confirmada no confirma automáticamente las demás.
+- si cualquier sucursal está CONFIRMED → negocio/plataforma = CONFIRMED;
+- si todas las sucursales observadas terminan NOT_FOUND → negocio/plataforma = NOT_FOUND;
+- si queda PENDING o ERROR sin un positivo → la decisión no está cerrada;
+- evidencia ambigua completada puede quedar UNCERTAIN.
 
-Antes de `NOT_FOUND` se registran como mínimo tres búsquedas: general, restringida a la plataforma o su dominio y marca más ubicación. Significa “No confirmada en la revisión realizada”, no ausencia absoluta.
+Una vez confirmado un Sí no se siguen revisando sucursales únicamente para volver a demostrar el mismo Sí.
 
-`UNCERTAIN` se usa sólo tras una búsqueda ejecutada con evidencia ambigua. Un fallo técnico se conserva como `PENDING` o `ERROR`.
+## Protocolo del agente
 
-## Progreso y bloqueo
+Para un check pendiente:
 
-El progreso tiene la forma:
+1. busca marca + plataforma;
+2. usa consulta restringida al dominio de la plataforma;
+3. busca marca + ubicación/sucursal cuando sea necesario;
+4. abre evidencia directa;
+5. valida nombre y ubicación/dirección compatibles;
+6. guarda evidencia incrementalmente.
 
-```text
-Platform verification: 81/270 checks completed
-```
+Antes de NOT_FOUND deben quedar documentadas al menos tres búsquedas: general, dominio/plataforma y marca + ubicación.
 
-El agente repite investigación e importación hasta que `completed_checks == expected_checks`. Si el navegador, el sitio o los permisos bloquean una comprobación, registra el bloqueo con precisión y genera sólo un DRAFT. Nunca inventa evidencia ni transforma el bloqueo en `UNCERTAIN`.
+Un bloqueo técnico es PENDING o ERROR. No es UNCERTAIN y nunca se convierte en No.
+
+## Estados públicos
+
+- CONFIRMED → **Sí**
+- NOT_FOUND → **No confirmada**
+- UNCERTAIN / PENDING / ERROR → **Requiere revisión**
+
+“No confirmada” describe la revisión realizada; no demuestra ausencia absoluta.
