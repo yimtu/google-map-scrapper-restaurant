@@ -98,8 +98,10 @@ def doctor(root, network=True):
         concurrency = int(settings.get('concurrency', 1))
         balanced = int(settings.get('balanced_concurrency', 2))
         browser_pool = int(settings.get('browser_pool', 1))
-        config_ok = 1 <= concurrency <= balanced <= 2 and 1 <= browser_pool <= 2 and int(settings.get('batch_size', 0)) > 0
-        add('Config', config_ok, f'Conservative runtime: c={concurrency}, balanced<={balanced}, pool={browser_pool}.')
+        pages = int(settings.get('pages_per_browser', 1))
+        config_ok = (1 <= concurrency <= balanced <= 2 and 1 <= browser_pool <= 2
+                     and pages == 1 and int(settings.get('batch_size', 0)) > 0)
+        add('Config', config_ok, f'Conservative runtime: c={concurrency}, balanced<={balanced}, pool={browser_pool}, pages={pages}.')
     else:
         add('Config', False, 'Run setup; settings.json missing/invalid.')
     try:
