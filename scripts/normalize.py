@@ -21,14 +21,35 @@ def coordinate(value, maximum):
 
 
 def normalize_record(raw, source=None):
+    """Normalize stable aliases while preserving every raw Gosom field."""
     record = dict(raw)
-    record.update(title=str(raw.get('title') or raw.get('name') or '').strip(),
-                  latitude=coordinate(raw.get('latitude'), 90),
-                  longitude=coordinate(raw.get('longitude'), 180),
-                  normalized_name=normalize_name(raw.get('title') or raw.get('name')),
-                  google_category=raw.get('category', ''),
-                  google_categories=raw.get('categories', []),
-                  provenance=[source or {}])
+    categories = raw.get('categories', [])
+    if isinstance(categories, str):
+        try:
+            parsed = json.loads(categories)
+            categories = parsed if isinstance(parsed, list) else [categories]
+        except (json.JSONDecodeError, TypeError):
+            categories = [part.strip() for part in categories.split(',') if part.strip()]
+    longitude = raw.get('longitude')
+    if longitude in (None, ''):
+        longitude = raw.get('longtitude')
+    website = raw.get('website')
+    if website in (None, ''):
+        website = raw.get('web_site')
+    description = raw.get('descriptions')
+    if description in (None, ''):
+        description = raw.get('description')
+    record.update(
+        title=str(raw.get('title') or raw.get('name') or '').strip(),
+        latitude=coordinate(raw.get('latitude'), 90),
+        longitude=coordinate(longitude, 180),
+        normalized_name=normalize_name(raw.get('title') or raw.get('name')),
+        website=website or '',
+        descriptions=description or '',
+        google_category=raw.get('category', ''),
+        google_categories=categories or [],
+        provenance=[source or {}],
+    )
     return record
 
 
