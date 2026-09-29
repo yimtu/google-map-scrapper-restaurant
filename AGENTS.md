@@ -1,75 +1,127 @@
 # FoodScan: contrato canónico para agentes
 
-Este archivo es la fuente canónica de operación para cualquier agente que trabaje en este repositorio. FoodScan es el producto; el agente sólo lo instala, ejecuta, supervisa y complementa con investigación web cuando corresponde.
+Este archivo es la fuente canónica de operación. FoodScan toma las decisiones determinísticas; el agente instala, ejecuta, supervisa y realiza investigación web únicamente cuando FoodScan genera checks pendientes.
 
-Lee `README.md` y la ayuda real de `python foodscan.py <comando> --help`. Opera desde la raíz del repositorio. Habla en lenguaje sencillo y reporta únicamente resultados comprobados.
+## Regla principal
+
+**No improvises el producto.** No sustituyas comandos, no edites snapshots para “arreglar” resultados, no cambies categorías después de aprobar un plan y no reinterpretes una salida porque te parezca más razonable.
 
 ## Peticiones del usuario
 
-- **“Prepara FoodScan”**: detecta el sistema operativo, verifica Python, ejecuta `setup`, prepara Gosom y el navegador, crea la configuración local, inicializa SQLite y ejecuta `doctor`. El objetivo es `FoodScan Doctor: READY`.
-- **“Actualiza FoodScan”**: completa doctor → territorio → plan inmutable → piloto de calibración (máximo 15 minutos) → presenta alcance, categorías, jobs, proxy, ETA base, ETA con presupuesto de expansión y política de fuente → espera aprobación humana explícita → adquisición o reanudación del plan aprobado → procesamiento → deduplicación → resolución conservadora de marcas → expansión dirigida de cadenas confirmadas 2–20 dentro del presupuesto aprobado → reprocesamiento → segmentos → verificación web de plataformas TARGET → quality gate → CSV → PDF → resumen.
-- **“Reanuda la corrida”**: consulta `status` y continúa el mismo snapshot con sus parámetros originales. No sustituyas una reanudación con una corrida nueva.
-- **“Compara este mes contra el anterior”**: ejecuta `compare`, comprueba que alcance y salud sean comparables y explica cambios y ausencias.
+- **“Prepara FoodScan”**: ejecuta setup y doctor. Termina sólo con FoodScan Doctor: READY o con el bloqueo exacto.
+- **“Actualiza FoodScan”**: doctor → territorio → plan inmutable con categorías humanas explícitas → piloto máximo 15 min → presentar alcance/categorías/queries/jobs/proxy/ETA → aprobación humana → adquisición exacta → procesamiento → marcas → expansión dirigida dentro del presupuesto → verificación independiente de Uber Eats/Rappi/DiDi Food para todo negocio confirmado con 3+ locales → quality gate → único PDF final.
+- **“Reanuda”**: usa el snapshot y plan existentes. Nunca lo sustituyas por una corrida nueva.
+- **“Compara”**: compara sólo snapshots con la misma firma metodológica.
 
-No preguntes al operador por zoom, depth, bbox, workers ni otros parámetros internos. Solicita sólo decisiones humanas reales, como aprobación territorial, una credencial introducida de forma local y oculta o permisos del sistema.
+No preguntes al operador por zoom, depth, bbox, workers, pool, páginas por navegador ni parámetros internos.
+
+## Categorías: contrato no negociable
+
+La query de Google Maps NO es un filtro duro de categoría. Gosom puede devolver recomendaciones ajenas a la búsqueda.
+
+1. El usuario expresa categorías humanas con --categories.
+2. FoodScan congela categorías, aliases y queries dentro del plan.
+3. El agente DEBE mostrar categorías solicitadas y queries derivadas antes de pedir aprobación.
+4. Después de aprobar, el agente NO PUEDE agregar, retirar, renombrar ni reinterpretar categorías.
+5. FoodScan clasifica cada establecimiento como REQUESTED, ADDITIONAL o UNCLASSIFIED.
+6. PROHIBIDO eliminar ADDITIONAL o UNCLASSIFIED para “limpiar” el resultado.
+7. ADDITIONAL y UNCLASSIFIED permanecen en raw, datos procesados y PDF, separados de los KPIs solicitados.
+8. Sólo REQUESTED alimenta KPIs de categorías solicitadas. Nunca afirmes que una query produjo exclusivamente esa categoría.
+
+Gosom usa JSON Lines como raw productivo para conservar category y categories[] cuando estén disponibles. No conviertas la adquisición productiva de vuelta a CSV si eso pierde categorías secundarias.
 
 ## Integridad operativa
 
-No inventes territorios ni aprobación humana. Los polígonos sintéticos de pruebas nunca son territorio productivo. Si falta una capa requerida, informa `ONE-TIME HUMAN INPUT REQUIRED` y sigue `territory/README_TERRITORY.md`.
+Antes de producción presenta territorio/hash, categorías solicitadas, queries derivadas, grid points, jobs, batches, proxy, versión/hash de Gosom, ETA, presupuesto de expansión y política de fuente.
 
-Antes de una corrida mensual presenta alcance, puntos, consultas activas/categorías, trabajos estimados, batches, uso de proxy, versiones, ETA observada y presupuesto máximo de expansión. Ejecuta primero el piloto de calibración; nunca puede convertirse en un censo productivo y su límite de pared es 15 minutos. La corrida completa no inicia hasta que una persona apruebe explícitamente ese plan y confirme la política de fuente/licenciamiento. No apruebes en nombre del usuario ni modifiques silenciosamente un plan ya aprobado.
+El piloto tiene hard wall de 15 minutos. El smoke usa 1×1×1; el piloto acotado prueba 2×2×1. Producción sólo usa 2×2×1 si el piloto realmente lo completó limpio.
 
-No declares éxito porque terminó un subproceso. Revisa contenido, batches y `run_report.json`. Un volumen anormalmente bajo, CAPTCHA o fallos requiere diagnóstico. No automatices CAPTCHA ni presentes una corrida parcial como completa.
+La corrida completa requiere aprobación humana explícita. El plan aprobado congela código, Gosom, territorio, proxy, settings, categorías, queries, jobs y runtime. Si cualquiera cambia, genera un nuevo plan y pide aprobación.
 
-Conserva los valores iniciales seguros definidos por FoodScan: navegador normal, concurrencia/pool/páginas conservadores y sin fast mode. El smoke se ejecuta en 1/1/1; el piloto acotado prueba realmente el perfil balanceado 2/2/1 y sólo puede recomendarlo cuando completa la muestra sin fallos; nunca escales automáticamente más allá del presupuesto aprobado. Gosom es una dependencia externa; `update-gosom` invalida el smoke anterior y exige uno nuevo. No uses Docker en la ruta normal.
+No automatices CAPTCHA. Un bloqueo de Google detiene la adquisición. No presentes una corrida parcial como completa.
 
-## Datos, secretos y trazabilidad
+## Identidad y marcas
 
-No cargues datasets completos en el contexto del modelo. Usa Python y SQLite para agrupar, filtrar y contar; inspecciona sólo resúmenes y casos ambiguos pequeños. No inventes conteos, marcas, cobertura ni estados.
+No fusiones negocios sólo por nombre, teléfono compartido, coordenadas o un único website.
 
-No fusiones sucursales sólo por coordenadas compartidas, teléfono o dominio corporativo. Conserva los datos originales y la trazabilidad. Una ausencia significa `missing_this_run`, no cierre. El número observado dentro del territorio no demuestra alcance nacional.
+- Los IDs de Google son aliases de un record_id interno persistente.
+- Conflictos entre aliases fallan cerrado.
+- Una cadena se confirma sólo con evidencia fuerte por establecimiento.
+- Un homónimo sin evidencia propia permanece independiente.
+- SINGLE=1, WATCHLIST=2, TARGET=3–20 y LARGE=21+ son segmentos descriptivos. No confundas TARGET con elegibilidad de plataformas.
 
-Nunca solicites ni imprimas secretos en conversación. Las credenciales y proxies se introducen localmente y no deben aparecer en logs, CSV, reportes ni commits. Conserva snapshots y estado de reanudación; no los borres para ocultar errores.
+## Uber Eats / Rappi / DiDi Food
 
-Después de modificar el producto, ejecuta la suite completa y revisa el diff. Distingue tests sintéticos, smoke real, piloto y corrida productiva. Los cambios críticos de identidad/marca deben conservar los gates adversariales; un nombre igual por sí solo nunca prueba que dos locales sean la misma cadena.
+**La decisión es por negocio y por plataforma, no por “delivery”.**
 
-## Segmentos y reportes
+Para TODA marca confirmada con 3 o más locales observados, sin importar giro y sin límite máximo de locales, deben existir tres decisiones independientes: Uber Eats, Rappi y DiDi Food.
 
-FoodScan clasifica SINGLE=1, WATCHLIST=2, TARGET=3–20 y LARGE=21+. La verificación automática de plataformas corresponde a TARGET, salvo instrucción expresa distinta.
+No existe un campo combinado delivery_status.
 
-Los estados internos son `PENDING`, `ERROR`, `CONFIRMED`, `NOT_FOUND` y `UNCERTAIN`:
+1. Una evidencia positiva de una sucursal basta para Sí a nivel negocio para esa plataforma.
+2. Para No confirmada, deben agotarse las búsquedas necesarias de los locales observados sin evidencia positiva.
+3. No confirmada no significa ausencia absoluta.
+4. Requiere revisión representa evidencia ambigua o check no resoluble limpiamente.
+5. Un link explícito de Uber/Rappi/DiDi dentro de order_online capturado por Gosom es evidencia positiva válida.
+6. La ausencia de order_online NUNCA significa No.
+7. Una plataforma confirmada no confirma las otras dos.
+8. Una marca con 30, 100 o más locales sigue dentro de esta regla si FoodScan la confirmó como cadena.
 
-- `PENDING`: todavía no investigado.
-- `ERROR`: se intentó la comprobación y hubo un bloqueo técnico real.
-- `CONFIRMED`: existe evidencia específica y verificable de esa sucursal.
-- `NOT_FOUND`: el protocolo de búsqueda se ejecutó sin hallar evidencia suficiente; no significa ausencia absoluta.
-- `UNCERTAIN`: la investigación se ejecutó y produjo evidencia realmente ambigua.
+FoodScan puede conservar detalle por sucursal, pero el quality gate cuenta una decisión independiente por negocio × plataforma. Cuando ya existe un positivo, no sigas investigando sucursales sólo para volver a probar el mismo Sí.
 
-Las salidas para usuario muestran sólo **Sí**, **No confirmada** y **Requiere revisión**. Si la verificación forma parte de la corrida, sólo se genera `FoodScan_Report.pdf` cuando el quality gate pasa. Con `PENDING` o `ERROR` se genera como máximo `FoodScan_Report_DRAFT.pdf`. Si la verificación no fue solicitada, la sección se omite.
+## Investigación web de checks pendientes
 
-## Verificación web obligatoria para TARGET
+Si platform_check_queue.csv contiene filas pendientes, el agente DEBE investigarlas con las capacidades web disponibles.
 
-**Si `platform_check_queue.csv` contiene registros `PENDING`, el agente DEBE resolverlos activamente utilizando las capacidades web disponibles en su entorno. Investiga cada combinación `branch × platform`, guarda o actualiza `platform_evidence.csv`, vuelve a ejecutar `foodscan verify-platforms` y repite hasta que `completed_checks == expected_checks` o exista un bloqueo real y documentado.**
+- prioriza URL directa de la plataforma;
+- verifica identidad mediante nombre + ubicación/dirección;
+- guarda evidencia inmediatamente;
+- nunca uses snippet o memoria del modelo como evidencia;
+- antes de NOT_FOUND registra mínimo búsqueda general, búsqueda restringida a plataforma/dominio y marca + ubicación;
+- bloqueo técnico = PENDING o ERROR.
 
-Al ejecutar **“Actualiza FoodScan”**, después de generar TARGET ejecuta:
+Después importa evidencia y vuelve a ejecutar foodscan verify-platforms. Repite hasta que las tres decisiones de cada negocio 3+ estén completas o exista un bloqueo documentado.
 
-```text
-python foodscan.py verify-platforms --month YYYY-MM
-```
+## Reporte: un solo entregable humano
 
-No preguntes si se deben verificar Uber Eats, Rappi o DiDi Food: forman parte del output TARGET. Python genera, importa y valida la cola; el agente realiza la investigación con el navegador o herramienta web disponible. No implementes un scraper HTTP alternativo para sustituir este procedimiento.
+El entregable humano canónico es **un solo PDF**. Los CSV/JSON/SQLite son soportes técnicos y no sustituyen al PDF.
 
-Para cada `branch × platform`:
+El PDF:
 
-1. Busca combinaciones de marca, dirección o colonia y plataforma. Ejecuta también una consulta restringida al dominio oficial cuando ayude.
-2. Abre el resultado y prioriza páginas directas de la plataforma. Un snippet o la memoria del modelo no son evidencia.
-3. Antes de `CONFIRMED`, comprueba identidad: nombre compatible, dirección o sucursal compatible y municipio o colonia compatible; usa teléfono u otra señal adicional cuando exista. Que el nombre aparezca en un buscador no basta.
-4. Guarda una fila con `brand_id`, `branch_id`, `platform`, `status`, `evidence_url`, `page_title`, `matched_name`, `matched_address`, `checked_at`, `method`, `confidence`, `notes` y `search_queries`.
-5. Antes de `NOT_FOUND`, ejecuta y registra como mínimo una búsqueda general, una restringida al dominio o plataforma y una por marca más ubicación.
-6. Una sucursal confirmada no confirma las demás. Un bloqueo técnico queda como `PENDING` o `ERROR`, nunca como `UNCERTAIN`.
+- tiene longitud dinámica; no existe límite de 3 páginas;
+- NO trunca TARGET a 18 ni WATCHLIST a 12;
+- incluye alcance aprobado y categorías solicitadas;
+- muestra raw → únicos → REQUESTED → ADDITIONAL → UNCLASSIFIED → marcas;
+- incluye todos los negocios confirmados con 3+ locales;
+- muestra columnas separadas Uber Eats / Rappi / DiDi Food;
+- incluye todos los locales observados de cada negocio 3+;
+- incluye el directorio completo REQUESTED;
+- incluye ADDITIONAL bajo Hallazgos adicionales;
+- incluye UNCLASSIFIED bajo No clasificados;
+- incluye metodología, advertencias y trazabilidad.
 
-Guarda evidencia incrementalmente y repite `verify-platforms` hasta completar el gate. Si el entorno no ofrece acceso web, no inventes resultados: conserva `PENDING`, genera DRAFT y explica qué capacidad falta y qué checks quedaron bloqueados.
+PROHIBIDO sustituir una tabla completa por “ver CSV adjunto” para ahorrar páginas.
+PROHIBIDO omitir Hallazgos adicionales.
+PROHIBIDO inventar No cuando el dato simplemente no fue capturado.
 
-## Criterio de terminación
+## Datos de Gosom
 
-Una actualización termina cuando el plan aprobado es el ejecutado, los batches base están completos, la expansión dirigida de marcas quedó completada o declarada no requerida dentro del presupuesto aprobado, los outputs son consistentes, la fase web TARGET alcanzó su estado permitido y el quality gate emitió `FINAL`. Si existe un bloqueo real o un presupuesto de expansión insuficiente, entrega DRAFT y enumera exactamente los checks pendientes o con error.
+Conserva los campos crudos disponibles. Teléfono, website, rating, review_count, open_hours, price_range, about, menu, order_online y categorías pueden alimentar el PDF o soportes.
+
+El campo status de Gosom NO debe presentarse como abierto/cerrado sin validación específica. Falta de dato significa “sin información capturada”, no “No”.
+
+## Quality gate y terminación
+
+FoodScan_Report.pdf sólo existe como FINAL cuando:
+
+1. adquisición requerida completa;
+2. plan ejecutado = plan aprobado;
+3. procesamiento y dedupe completos;
+4. expansión completada o declarada no requerida;
+5. cada marca confirmada con 3+ locales tiene resueltas independientemente Uber Eats, Rappi y DiDi Food;
+6. no hay checks requeridos PENDING o ERROR;
+7. el reporte se generó desde el snapshot trazable.
+
+Si falta cualquiera, máximo FoodScan_Report_DRAFT.pdf.
+
+Antes de declarar terminado: ejecuta pruebas si modificaste producto, revisa diff, run_report.json, report_traceability.json y comprueba que el PDF existe. No declares éxito porque un subproceso terminó; declara éxito porque el contrato completo pasó.
