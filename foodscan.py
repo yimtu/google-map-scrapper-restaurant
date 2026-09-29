@@ -418,6 +418,10 @@ def command_monthly(args) -> int:
     result = execute_manifest(ROOT, manifest_path)
     if result["status"] == "completed":
         report = finish_snapshot(destination)
+        if report.get("brand_expansion_pending"):
+            print(f"Adquisición base completa; expansión dirigida de marcas pendiente: {destination}")
+            print(f"Ejecuta: foodscan expand-brands --month {month}")
+            return 3
         if report.get("report_status") == "DRAFT":
             print(f"Adquisición completa; verificación de plataformas pendiente: {destination}")
             print(f"Ejecuta: foodscan verify-platforms --month {month}")
@@ -434,6 +438,9 @@ def command_resume(args) -> int:
     result = execute_manifest(ROOT, path)
     if result["status"] == "completed" and path.parent.parent.name == "snapshots":
         report = finish_snapshot(path.parent)
+        if report.get("brand_expansion_pending"):
+            print(f"Adquisición base completa; expansión dirigida de marcas pendiente: {path.parent}")
+            return 3
         if report.get("report_status") == "DRAFT":
             print(f"Adquisición completa; verificación de plataformas pendiente: {path.parent}")
             return 3
