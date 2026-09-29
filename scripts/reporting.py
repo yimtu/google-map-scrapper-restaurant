@@ -325,7 +325,7 @@ def _build_pdf(path: Path, places: list[dict], commercial: list[dict], metrics: 
                 _first(row, "review_rating", "rating"), row.get("review_count", ""),
                 row.get("phone", ""), row.get("website", ""),
             ])
-        story.append(_table(data, [34*mm, 30*mm, 31*mm, 25*mm, 54*mm, 12*mm, 14*mm, 25*mm, 42*mm], small, 5.7))
+        story.append(_table(data, [34*mm, 30*mm, 31*mm, 25*mm, 48*mm, 12*mm, 14*mm, 25*mm, 38*mm], small, 5.7))
 
     directory_section(
         "Directorio — categorías solicitadas",
