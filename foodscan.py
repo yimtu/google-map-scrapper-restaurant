@@ -678,8 +678,6 @@ def parser() -> argparse.ArgumentParser:
         item.set_defaults(function=function)
         if name == "status":
             item.add_argument("--month")
-    item.add_argument("--categories",
-                      help="categorías humanas separadas por coma; FoodScan congela queries y reglas")
             item.add_argument("--run")
 
     item = commands.add_parser("proxy")
