@@ -580,6 +580,27 @@ def generate_standard_reports(snapshot: Path, places: Iterable[dict], brands: It
                     snapshot_id, generated_at,
                 ))
 
+    requested_category_summary = {
+        category: sum(category in (row.get("matched_requested_categories") or [])
+                      for row in places if row.get("category_relationship") == "REQUESTED")
+        for category in run_report.get("requested_categories") or []
+    }
+    additional_category_summary = {}
+    for row in places:
+        if row.get("category_relationship") != "ADDITIONAL":
+            continue
+        category = str(row.get("google_category") or "Sin categoría")
+        additional_category_summary[category] = additional_category_summary.get(category, 0) + 1
+    data_coverage = {}
+    for field in ("google_category", "phone", "website", "review_rating", "review_count",
+                  "open_hours", "price_range", "about", "menu", "order_online"):
+        count = sum(row.get(field) not in (None, "", [], {}) for row in places)
+        data_coverage[field] = {
+            "with_data": count,
+            "total": len(places),
+            "pct": round(100 * count / len(places), 1) if places else 0,
+        }
+
     trace = {
         "snapshot_id": snapshot_id,
         "generated_at": generated_at,
@@ -594,6 +615,11 @@ def generate_standard_reports(snapshot: Path, places: Iterable[dict], brands: It
                 "source_run_ids", [run_report.get("run_id")] if run_report.get("run_id") else []),
         },
         "metrics": metrics,
+        "requested_category_summary": requested_category_summary,
+        "additional_category_summary": dict(sorted(
+            additional_category_summary.items(), key=lambda item: (-item[1], item[0].casefold())
+        )),
+        "data_coverage": data_coverage,
         "tables": [
             {"table_id": "multi_location_3_plus", "source_file": "multi_location_3_plus.csv",
              "filters": "confirmed brand AND branch_count_amg >= 3",
