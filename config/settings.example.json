@@ -23,5 +23,7 @@
   "commercial_target_max_branches": 20,
   "telemetry_disabled": true,
   "source_policy_version": "2026-09-29",
-  "brand_expansion_max_jobs": 250
+  "brand_expansion_max_jobs": 250,
+  "pilot_concurrency": 2,
+  "pilot_browser_pool": 2
 }
