@@ -120,6 +120,19 @@ def _validate_binary(binary: Path, manifest: dict[str, Any]) -> None:
         raise RuntimeError("El binario Gosom cambió desde que se creó el plan; no se reanuda con otro motor")
 
 
+def _validate_proxy(root: Path, manifest: dict[str, Any]) -> None:
+    expected = manifest.get("proxy_file_sha256")
+    if not expected:
+        return
+    path = root / "config" / "secrets" / "proxies.txt"
+    if not path.is_file():
+        raise RuntimeError("El plan fue aprobado con proxy y el archivo ya no existe")
+    import hashlib
+    current = hashlib.sha256(path.read_bytes()).hexdigest()
+    if current != expected:
+        raise RuntimeError("La configuración de proxy cambió desde la aprobación; genera/aprueba un plan nuevo")
+
+
 def execute_manifest(
     root: Path, manifest_path: Path, *, binary: Path | None = None,
     only_incomplete: bool = True,
@@ -135,6 +148,7 @@ def execute_manifest(
     if not binary.is_file():
         raise FileNotFoundError("Gosom no está instalado; ejecuta foodscan setup")
     _validate_binary(binary, manifest)
+    _validate_proxy(root, manifest)
 
     settings = _settings(manifest)
     max_retries = max(0, int(settings.get("batch_max_retries", 2)))
