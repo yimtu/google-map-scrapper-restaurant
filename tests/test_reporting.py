@@ -44,7 +44,14 @@ class ReportingTests(unittest.TestCase):
                     "municipality": "Zapopan", "inside_core_periferico": index == 0,
                     "inside_urban_amg": index < 3, "inside_amg_full": True,
                     "address": f'Calle {index + 1}', "latitude": 20.7, "longitude": -103.4,
-                    "review_rating": 4.5, "review_count": 10,
+                    "review_rating": 4.5, "review_count": 10, "price_range": "$",
+                    "phone": "3312345678", "website": "https://local.example",
+                    "open_hours": {"lunes": ["09:00–18:00"]},
+                    "about": [{"name": "Servicio", "options": [
+                        {"name": "Entrega a domicilio", "enabled": True, "values": []}
+                    ]}],
+                    "menu": {"link": "https://local.example/menu", "source": "Menú"},
+                    "order_online": [{"link": "https://local.example/order", "source": "Pedido"}],
                     "merchant_family": brand["merchant_family"],
                     "google_category": brand["merchant_family"],
                     "category_relationship": relationship,
@@ -106,6 +113,11 @@ class ReportingTests(unittest.TestCase):
                 "every confirmed business with >=3 observed locations; category-independent",
                 trace["platform_evidence"]["selection_rule"],
             )
+            self.assertEqual({"tacos": len([p for p in places if p["category_relationship"] == "REQUESTED"]),
+                              "postres": 0, "nieves": 0},
+                             trace["requested_category_summary"])
+            self.assertIn("Ferretería", trace["additional_category_summary"])
+            self.assertGreater(trace["data_coverage"]["open_hours"]["pct"], 0)
 
             text = "\n".join(page.extract_text() or "" for page in PdfReader(str(result["pdf"])).pages)
             for expected_text in (
@@ -114,6 +126,7 @@ class ReportingTests(unittest.TestCase):
                 "Uber Eats", "Rappi", "DiDi Food",
                 "Marca Target", "Marca Grande",
                 "Negocios confirmados con 3+ locales",
+                "Disponibilidad real de datos", "Entrega a domicilio", "09:00",
             ):
                 self.assertIn(expected_text, text)
             self.assertNotIn("delivery_status", text)
